@@ -35,6 +35,7 @@
   --color-warning: var(--warning);
   --color-warning-foreground: var(--warning-foreground);
   --color-opal: var(--opal);
+  --color-sidebar: var(--sidebar);
 }
 
 :root {
@@ -54,6 +55,8 @@
 
   --background: #121005;
   --foreground: #ffffff;
+
+  --sidebar: #0e0e0b;
 
   --card: #18160b;
   --card-foreground: #ffffff;
@@ -102,6 +105,8 @@
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);
+    min-height: 100vh;
+    background-image: linear-gradient(180deg, rgb(255 255 255 / 1.5%), transparent 280px);
   }
   h1,
   h2,

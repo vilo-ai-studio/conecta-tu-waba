@@ -3,7 +3,12 @@ import { requireDatabaseAuth } from "@/integrations/database/auth-middleware";
 import { z } from "zod";
 
 async function assertAdmin(database: any, userId: string) {
-  const { data, error } = await database.from("user_roles").select("role").eq("user_id", userId).eq("role", "admin").maybeSingle();
+  const { data, error } = await database
+    .from("user_roles")
+    .select("role")
+    .eq("user_id", userId)
+    .eq("role", "admin")
+    .maybeSingle();
   if (error || !data) throw new Error("No autorizado. Se requiere rol admin.");
 }
 
@@ -13,7 +18,9 @@ export const listClients = createServerFn({ method: "GET" })
     await assertAdmin(context.database, context.userId);
     const { data, error } = await context.database
       .from("clients")
-      .select("id,name,email,company_name,status,created_at,whatsapp_accounts(id,status,display_phone_number,verified_name,waba_id,phone_number_id,webhook_subscribed)")
+      .select(
+        "id,name,email,company_name,status,n8n_enabled,created_at,whatsapp_accounts(id,status,display_phone_number,verified_name,waba_id,phone_number_id,webhook_subscribed)",
+      )
       .order("created_at", { ascending: false });
     if (error) throw new Error(error.message);
     return data;
@@ -37,17 +44,34 @@ export const getClient = createServerFn({ method: "GET" })
 export const createClient = createServerFn({ method: "POST" })
   .middleware([requireDatabaseAuth])
   .inputValidator((input: { name: string; email?: string; company_name?: string }) =>
-    z.object({
-      name: z.string().trim().min(1).max(200),
-      email: z.string().trim().email().max(255).optional().or(z.literal("").transform(() => undefined)),
-      company_name: z.string().trim().max(200).optional().or(z.literal("").transform(() => undefined)),
-    }).parse(input),
+    z
+      .object({
+        name: z.string().trim().min(1).max(200),
+        email: z
+          .string()
+          .trim()
+          .email()
+          .max(255)
+          .optional()
+          .or(z.literal("").transform(() => undefined)),
+        company_name: z
+          .string()
+          .trim()
+          .max(200)
+          .optional()
+          .or(z.literal("").transform(() => undefined)),
+      })
+      .parse(input),
   )
   .handler(async ({ context, data }) => {
     await assertAdmin(context.database, context.userId);
     const { data: created, error } = await context.database
       .from("clients")
-      .insert({ name: data.name, email: data.email ?? null, company_name: data.company_name ?? null })
+      .insert({
+        name: data.name,
+        email: data.email ?? null,
+        company_name: data.company_name ?? null,
+      })
       .select()
       .single();
     if (error) throw new Error(error.message);
@@ -63,10 +87,12 @@ function makeToken() {
 export const createOnboardingLink = createServerFn({ method: "POST" })
   .middleware([requireDatabaseAuth])
   .inputValidator((input: { client_id: string; expires_in_hours?: number }) =>
-    z.object({
-      client_id: z.string().uuid(),
-      expires_in_hours: z.number().int().min(1).max(720).optional(),
-    }).parse(input),
+    z
+      .object({
+        client_id: z.string().uuid(),
+        expires_in_hours: z.number().int().min(1).max(720).optional(),
+      })
+      .parse(input),
   )
   .handler(async ({ context, data }) => {
     await assertAdmin(context.database, context.userId);
@@ -144,12 +170,20 @@ export const updateClientN8n = createServerFn({ method: "POST" })
     if (data.n8n_webhook_secret !== undefined) {
       update.n8n_webhook_secret_encrypted = data.n8n_webhook_secret;
     }
-    console.log("[updateClientN8n] update", { id: data.id, ...update, n8n_webhook_secret_encrypted: update.n8n_webhook_secret_encrypted ? "***" : update.n8n_webhook_secret_encrypted });
+    console.log("[updateClientN8n] update", {
+      id: data.id,
+      ...update,
+      n8n_webhook_secret_encrypted: update.n8n_webhook_secret_encrypted
+        ? "***"
+        : update.n8n_webhook_secret_encrypted,
+    });
     const { data: updated, error } = await databaseAdmin
       .from("clients")
       .update(update)
       .eq("id", data.id)
-      .select("id, n8n_enabled, n8n_webhook_url, n8n_webhook_secret_encrypted, n8n_last_delivery_at, n8n_last_delivery_status, n8n_last_delivery_error")
+      .select(
+        "id, n8n_enabled, n8n_webhook_url, n8n_webhook_secret_encrypted, n8n_last_delivery_at, n8n_last_delivery_status, n8n_last_delivery_error",
+      )
       .single();
     if (error) {
       console.error("[updateClientN8n] error", error);
@@ -165,7 +199,6 @@ export const updateClientN8n = createServerFn({ method: "POST" })
       n8n_last_delivery_error: updated.n8n_last_delivery_error,
     };
   });
-
 
 // Envía un evento sintético a la URL de n8n del cliente para verificar la
 // configuración. Actualiza los campos n8n_last_delivery_* con el resultado.
@@ -199,7 +232,15 @@ export const sendN8nTestEvent = createServerFn({ method: "POST" })
               value: {
                 messaging_product: "whatsapp",
                 metadata: { display_phone_number: "test", phone_number_id: "test" },
-                messages: [{ from: "test", id: "test", timestamp: `${Date.now()}`, text: { body: "Evento de prueba desde el panel" }, type: "text" }],
+                messages: [
+                  {
+                    from: "test",
+                    id: "test",
+                    timestamp: `${Date.now()}`,
+                    text: { body: "Evento de prueba desde el panel" },
+                    type: "text",
+                  },
+                ],
               },
             },
           ],

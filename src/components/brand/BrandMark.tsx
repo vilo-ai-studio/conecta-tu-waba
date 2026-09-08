@@ -1,11 +1,10 @@
 import { cn } from "@/lib/utils";
-import viloLogo from "@/assets/vilo-logo-white.png.asset.json";
-import buhoLogo from "@/assets/buho-logo-white.png.asset.json";
+import { Network } from "lucide-react";
 
-const logoHeight: Record<"sm" | "md" | "lg", string> = {
-  sm: "h-4",
-  md: "h-6",
-  lg: "h-8",
+const brandSize: Record<"sm" | "md" | "lg", { icon: string; text: string; gap: string }> = {
+  sm: { icon: "h-8 w-8", text: "text-sm", gap: "gap-2.5" },
+  md: { icon: "h-10 w-10", text: "text-base", gap: "gap-3" },
+  lg: { icon: "h-12 w-12", text: "text-lg", gap: "gap-3.5" },
 };
 
 interface BrandMarkProps {
@@ -15,21 +14,22 @@ interface BrandMarkProps {
 
 /** Lockup Vilo × Búho reutilizable en headers y footers de marca. */
 export function BrandMark({ size = "md", className }: BrandMarkProps) {
+  const styles = brandSize[size];
   return (
-    <div className={cn("flex items-center gap-3", className)}>
-      <img
-        src={viloLogo.url}
-        alt="Vilo"
-        className={cn(logoHeight[size], "w-auto brightness-0 invert")}
-      />
-      <span className="text-sm text-muted-foreground/60" aria-hidden>
-        ×
+    <div className={cn("flex items-center", styles.gap, className)} aria-label="Vilo y Búho">
+      <span
+        className={cn(
+          "grid flex-none place-items-center rounded-xl bg-accent text-accent-foreground shadow-sm",
+          styles.icon,
+        )}
+      >
+        <Network className="h-1/2 w-1/2" strokeWidth={2.4} />
       </span>
-      <img
-        src={buhoLogo.url}
-        alt="Búho"
-        className={cn(logoHeight[size], "w-auto brightness-0 invert")}
-      />
+      <span
+        className={cn("font-display font-semibold tracking-tight text-foreground", styles.text)}
+      >
+        VILO <span className="font-normal text-muted-foreground">×</span> BÚHO
+      </span>
     </div>
   );
 }

@@ -77,36 +77,26 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "WhatsApp Onboarding — Panel Tech Provider" },
+      { title: "Centro de Control — Vilo × Búho" },
       {
         name: "description",
         content:
-          "Panel interno para conectar clientes de WhatsApp Business con Meta Embedded Signup y coexistencia.",
+          "Portal privado para administrar clientes, conexiones de WhatsApp y rutas de automatización.",
       },
       { name: "robots", content: "noindex,nofollow" },
-      { property: "og:title", content: "WhatsApp Onboarding — Panel Tech Provider" },
+      { property: "og:title", content: "Centro de Control — Vilo × Búho" },
       {
         property: "og:description",
         content:
-          "Panel interno para conectar clientes de WhatsApp Business con Meta Embedded Signup y coexistencia.",
+          "Portal privado para administrar clientes, conexiones de WhatsApp y rutas de automatización.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
-      { name: "twitter:title", content: "WhatsApp Onboarding — Panel Tech Provider" },
+      { name: "twitter:title", content: "Centro de Control — Vilo × Búho" },
       {
         name: "twitter:description",
         content:
-          "Panel interno para conectar clientes de WhatsApp Business con Meta Embedded Signup y coexistencia.",
-      },
-      {
-        property: "og:image",
-        content:
-          "https://storage.googleapis.com/gpt-engineer-file-uploads/attachments/og-images/15093659-a596-4fad-bbdf-eddefdbc8446",
-      },
-      {
-        name: "twitter:image",
-        content:
-          "https://storage.googleapis.com/gpt-engineer-file-uploads/attachments/og-images/15093659-a596-4fad-bbdf-eddefdbc8446",
+          "Portal privado para administrar clientes, conexiones de WhatsApp y rutas de automatización.",
       },
     ],
     links: [
