@@ -1,5 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { normalizeWaId } from "@/lib/wa-id";
+import { getPool } from "@/integrations/database/client.server";
+import {
+  BodyTooLargeError,
+  constantTimeEqual,
+  enforceTokenBucket,
+  readJsonWithLimit,
+} from "@/lib/request-security.server";
 
 // Endpoint público llamado por instancias n8n para enviar mensajes de WhatsApp
 // a través de Meta Cloud API. n8n NUNCA recibe el access token real; solo envía
@@ -25,7 +32,7 @@ export const Route = createFileRoute("/api/public/whatsapp/send-message")({
       POST: async ({ request }) => {
         try {
           const secret = request.headers.get("x-n8n-webhook-secret") ?? "";
-          const body = (await request.json().catch(() => null)) as {
+          let body: {
             client_id?: string;
             to?: string;
             message?: string;
@@ -35,6 +42,14 @@ export const Route = createFileRoute("/api/public/whatsapp/send-message")({
             template_language?: string;
             inbound_message_id?: string;
           } | null;
+          try {
+            body = await readJsonWithLimit(request, 131_072);
+          } catch (error) {
+            if (error instanceof BodyTooLargeError) {
+              return Response.json({ ok: false, error: "payload_too_large" }, { status: 413 });
+            }
+            return Response.json({ ok: false, error: "invalid_json" }, { status: 400 });
+          }
 
           if (!body || !body.client_id) {
             return Response.json(
@@ -42,7 +57,6 @@ export const Route = createFileRoute("/api/public/whatsapp/send-message")({
               { status: 400 },
             );
           }
-
           const isTemplate = !!body.template_name;
           const type = (body.type ?? (isTemplate ? "template" : "text")).toLowerCase();
           const isTypingIndicator = type === "typing_indicator";
@@ -73,7 +87,7 @@ export const Route = createFileRoute("/api/public/whatsapp/send-message")({
             return Response.json({ ok: false, error: "unsupported_type" }, { status: 400 });
           }
 
-    const { databaseAdmin } = await import("@/integrations/database/client.server");
+          const { databaseAdmin } = await import("@/integrations/database/client.server");
 
           // 1) Buscar cliente + secreto n8n
           const { data: client, error: cErr } = await databaseAdmin
@@ -87,9 +101,15 @@ export const Route = createFileRoute("/api/public/whatsapp/send-message")({
           if (!client.n8n_webhook_secret_encrypted) {
             return Response.json({ ok: false, error: "n8n_not_configured" }, { status: 403 });
           }
-          if (!secret || secret !== client.n8n_webhook_secret_encrypted) {
+          if (!secret || !constantTimeEqual(secret, client.n8n_webhook_secret_encrypted)) {
             return Response.json({ ok: false, error: "invalid_secret" }, { status: 401 });
           }
+          const limited = await enforceTokenBucket({
+            key: `send:${body.client_id}`,
+            ratePerSecond: 20,
+            burst: 40,
+          });
+          if (limited) return limited;
 
           // 2) Cuenta WhatsApp conectada del cliente
           const { data: acct, error: aErr } = await databaseAdmin
@@ -101,10 +121,7 @@ export const Route = createFileRoute("/api/public/whatsapp/send-message")({
             .limit(1)
             .maybeSingle();
           if (aErr || !acct || !acct.phone_number_id || !acct.token_encrypted) {
-            return Response.json(
-              { ok: false, error: "no_connected_account" },
-              { status: 409 },
-            );
+            return Response.json({ ok: false, error: "no_connected_account" }, { status: 409 });
           }
 
           // Dedup de respuestas: si ya se envió un reply exitoso para este
@@ -141,6 +158,53 @@ export const Route = createFileRoute("/api/public/whatsapp/send-message")({
                 reason: "reply_already_sent_for_inbound_message",
                 message_id: prior.meta_message_id ?? null,
               });
+            }
+          }
+
+          const suppliedIdempotency = request.headers.get("idempotency-key")?.trim();
+          if (suppliedIdempotency && suppliedIdempotency.length > 200) {
+            return Response.json({ ok: false, error: "invalid_idempotency_key" }, { status: 400 });
+          }
+          const idempotencyKey =
+            suppliedIdempotency || (!isTypingIndicator ? inboundMessageId : null);
+          if (idempotencyKey) {
+            const claim = await getPool().query(
+              `INSERT INTO outbound_idempotency (client_id, idempotency_key, status)
+               VALUES ($1, $2, 'processing')
+               ON CONFLICT (client_id, idempotency_key) DO NOTHING
+               RETURNING idempotency_key`,
+              [client.id, idempotencyKey],
+            );
+            if (!claim.rowCount) {
+              const prior = await getPool().query<{
+                status: string;
+                response_status: number | null;
+                response_body: any;
+                updated_at: string;
+              }>(
+                "SELECT status, response_status, response_body, updated_at FROM outbound_idempotency WHERE client_id = $1 AND idempotency_key = $2",
+                [client.id, idempotencyKey],
+              );
+              const record = prior.rows[0];
+              if (record?.status === "completed") {
+                return Response.json(
+                  { ...record.response_body, deduped: true },
+                  { status: record.response_status ?? 200 },
+                );
+              }
+              if (record?.status === "processing") {
+                const stale = Date.now() - new Date(record.updated_at).getTime() > 120_000;
+                if (!stale) {
+                  return Response.json(
+                    { ok: false, error: "request_in_progress" },
+                    { status: 409 },
+                  );
+                }
+              }
+              await getPool().query(
+                "UPDATE outbound_idempotency SET status = 'processing', response_status = NULL, response_body = NULL WHERE client_id = $1 AND idempotency_key = $2",
+                [client.id, idempotencyKey],
+              );
             }
           }
 
@@ -210,6 +274,7 @@ export const Route = createFileRoute("/api/public/whatsapp/send-message")({
                 authorization: `Bearer ${acct.token_encrypted}`,
               },
               body: JSON.stringify(metaBody),
+              signal: AbortSignal.timeout(Number(process.env.META_TIMEOUT_MS ?? 15_000)),
             });
             httpStatus = res.status;
             metaJson = await res.json().catch(() => ({}));
@@ -219,10 +284,8 @@ export const Route = createFileRoute("/api/public/whatsapp/send-message")({
             console.error("[send-message] network error", networkErr);
           }
 
-          const metaMessageId = ok ? metaJson?.messages?.[0]?.id ?? null : null;
-          const errMsg = !ok
-            ? metaJson?.error?.message ?? networkErr ?? "Fallo al enviar"
-            : null;
+          const metaMessageId = ok ? (metaJson?.messages?.[0]?.id ?? null) : null;
+          const errMsg = !ok ? (metaJson?.error?.message ?? networkErr ?? "Fallo al enviar") : null;
 
           const toDigits = String(body.to ?? "").replace(/[^\d]/g, "");
 
@@ -254,18 +317,40 @@ export const Route = createFileRoute("/api/public/whatsapp/send-message")({
             meta_message_status: ok ? "accepted" : null,
             success: ok,
             error_code: metaJson?.error?.code != null ? String(metaJson.error.code) : null,
-            error_subcode: metaJson?.error?.error_subcode != null ? String(metaJson.error.error_subcode) : null,
+            error_subcode:
+              metaJson?.error?.error_subcode != null ? String(metaJson.error.error_subcode) : null,
             error_type: metaJson?.error?.type ?? (networkErr ? "network_error" : null),
             error_message: errMsg,
             fbtrace_id: metaJson?.error?.fbtrace_id ?? null,
             source: "n8n",
             inbound_message_id: inboundMessageId,
+            idempotency_key: idempotencyKey,
           } as any);
 
           if (!ok) {
+            if (idempotencyKey) {
+              await getPool().query(
+                "UPDATE outbound_idempotency SET status = 'failed', response_status = $3, response_body = $4 WHERE client_id = $1 AND idempotency_key = $2",
+                [
+                  client.id,
+                  idempotencyKey,
+                  httpStatus || 502,
+                  {
+                    ok: false,
+                    error: "meta_error",
+                    detail: metaJson ?? { network_error: networkErr },
+                  },
+                ],
+              );
+            }
             console.error("[send-message] Meta error", httpStatus, metaJson);
             return Response.json(
-              { ok: false, error: "meta_error", status: httpStatus, detail: metaJson ?? { network_error: networkErr } },
+              {
+                ok: false,
+                error: "meta_error",
+                status: httpStatus,
+                detail: metaJson ?? { network_error: networkErr },
+              },
               { status: 502 },
             );
           }
@@ -273,7 +358,18 @@ export const Route = createFileRoute("/api/public/whatsapp/send-message")({
           // typing_indicator es efímero: no genera mensaje real, no se espeja
           // a Chatwoot y no devuelve message_id.
           if (isTypingIndicator) {
-            return Response.json({ ok: true, typing_indicator: true, inbound_message_id: inboundMessageId });
+            const typingResponse = {
+              ok: true,
+              typing_indicator: true,
+              inbound_message_id: inboundMessageId,
+            };
+            if (idempotencyKey) {
+              await getPool().query(
+                "UPDATE outbound_idempotency SET status = 'completed', response_status = 200, response_body = $3 WHERE client_id = $1 AND idempotency_key = $2",
+                [client.id, idempotencyKey, typingResponse],
+              );
+            }
+            return Response.json(typingResponse);
           }
 
           // Mirror bot response into Chatwoot (opt-in per client). Never blocks
@@ -308,8 +404,14 @@ export const Route = createFileRoute("/api/public/whatsapp/send-message")({
             console.error("[send-message] chatwoot mirror failed", mirrorErr);
           }
 
-          return Response.json({ ok: true, message_id: metaMessageId, meta: metaJson });
-
+          const successResponse = { ok: true, message_id: metaMessageId, meta: metaJson };
+          if (idempotencyKey) {
+            await getPool().query(
+              "UPDATE outbound_idempotency SET status = 'completed', response_status = 200, response_body = $3 WHERE client_id = $1 AND idempotency_key = $2",
+              [client.id, idempotencyKey, successResponse],
+            );
+          }
+          return Response.json(successResponse);
         } catch (err: any) {
           console.error("[send-message] error", err);
           return Response.json(

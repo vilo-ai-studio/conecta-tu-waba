@@ -7,7 +7,8 @@ en el sitio publicado. La seguridad se implementa dentro de cada handler
 Base URL de producción:
 
 - `https://<DOMAIN>` donde `DOMAIN` es el host configurado en `.env.vps`.
-- Dominio previsto actualmente: `https://connect.buho-solutions.com` (DNS y corte: **Por confirmar**).
+- Dominio de preproducción: `https://vps-connect.buho-solutions.com`.
+- El cambio de tráfico productivo continúa **Por confirmar**.
 
 ---
 
@@ -149,24 +150,23 @@ Verificación del webhook de Meta.
 
 Recibe eventos de Meta (mensajes entrantes y status updates).
 
-**Auth:** ninguna (Meta no firma; se identifica al cliente por `phone_number_id`).
+**Auth:** `X-Hub-Signature-256`, validada con HMAC SHA-256 y comparación en tiempo constante.
 
 **Comportamiento:**
 
-1. Guarda **siempre** el payload crudo en `raw_meta_webhook_events` (incluye
-   detección heurística del botón "Test" de Meta Developers).
-2. Registra cada change en `meta_webhook_events`.
-3. Deduplica mensajes entrantes por `messages[0].id` usando
-   `processed_whatsapp_messages` (con contador `duplicate_count`).
-4. Sincroniza inbound con Chatwoot si el cliente lo tiene habilitado.
-5. Reenvía a n8n **solo** eventos `message` (nunca `status`) si:
+1. Rechaza más de 1 MB, valida la firma y parsea el cuerpo crudo una sola vez.
+2. Guarda el payload crudo y un trabajo por `change` en una sola transacción PostgreSQL.
+3. Deduplica por `wa_message_id` o por una clave SHA-256 determinista.
+4. Intenta publicar en Redis y responde después del commit, sin esperar a n8n ni Chatwoot.
+5. El worker procesa todos los mensajes/estados contenidos en cada `change` y sincroniza Chatwoot.
+6. Reenvía a n8n **solo** eventos `message` (nunca `status`) si:
    - `n8n_enabled=true`
    - `n8n_webhook_url` presente
    - `n8n_webhook_secret_encrypted` presente
    - el bot no está pausado (label o assignee en Chatwoot).
-6. Si es `status`, actualiza `whatsapp_send_logs` por `meta_message_id`.
+7. Si es `status`, actualiza `whatsapp_send_logs` por `meta_message_id`.
 
-**Response:** siempre `200 ok` a Meta (independiente de fallos internos).
+**Response:** `200` después de persistir. Devuelve `401` para firma inválida, `413` para exceso de tamaño y `503` si falta la configuración de firma o PostgreSQL no puede guardar. Un fallo de Redis no impide el `200`: el reconciliador publica después.
 
 **Payload enviado a n8n** (`POST` al `n8n_webhook_url` del cliente):
 
@@ -177,6 +177,7 @@ content-type: application/json
 X-Client-ID: <uuid>
 X-Phone-Number-ID: <phone_number_id>
 X-N8N-Webhook-Secret: <secreto compartido>
+Idempotency-Key: <job_id:item_key>
 ```
 
 Body (mensaje):
@@ -208,6 +209,8 @@ token de Meta.
 
 **Auth:** header `X-N8N-Webhook-Secret` debe coincidir con
 `clients.n8n_webhook_secret_encrypted`.
+
+Acepta `Idempotency-Key` opcional. Si no existe, usa `inbound_message_id` para respuestas reales; el indicador de escritura no consume esa clave implícita.
 
 **Body — texto:**
 
@@ -257,7 +260,9 @@ token de Meta.
 - `401 { ok:false, error:"invalid_secret" }`
 - `403 { ok:false, error:"n8n_not_configured" }`
 - `404 { ok:false, error:"client_not_found" }`
-- `409 { ok:false, error:"no_connected_account" }`
+- `409 { ok:false, error:"no_connected_account" | "request_in_progress" }`
+- `413 { ok:false, error:"payload_too_large" }`
+- `429 { ok:false, error:"rate_limited" }`
 - `500 { ok:false, error:"server_error", detail }`
 - `502 { ok:false, error:"meta_error", status, detail }`
 

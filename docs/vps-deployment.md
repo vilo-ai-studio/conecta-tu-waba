@@ -1,6 +1,6 @@
 # Despliegue y migración al VPS
 
-Esta guía mueve Conecta WABA a un VPS propio con Node.js, PostgreSQL y Caddy. La aplicación final no necesita Lovable ni un Worker de Cloudflare.
+Esta guía mueve Conecta WABA a un VPS propio con Node.js, PostgreSQL, Redis, un worker BullMQ y Caddy. La aplicación final no necesita Lovable ni un Worker de Cloudflare.
 
 ## 1. Requisitos previos
 
@@ -28,10 +28,11 @@ Valida la configuración y levanta los servicios:
 docker compose --env-file .env.vps config
 docker compose --env-file .env.vps up -d --build
 docker compose --env-file .env.vps ps
-curl -fsS http://127.0.0.1:${APP_PORT:-3000}/api/health
+curl -fsS http://127.0.0.1:${APP_PORT:-3000}/api/health/live
+curl -fsS http://127.0.0.1:${APP_PORT:-3000}/api/health/ready
 ```
 
-El contenedor de la aplicación ejecuta automáticamente las migraciones pendientes al iniciar. Son idempotentes y quedan registradas en `schema_migrations`.
+El contenedor de la aplicación ejecuta automáticamente las migraciones pendientes al iniciar. Son idempotentes y quedan registradas en `schema_migrations`. Redis usa AOF para recuperarse rápido, pero PostgreSQL sigue siendo la copia durable y permite reconstruir la cola.
 
 Antes de migrar datos reales, compara el inventario de tablas que muestra el importador con la base actual. Si la plataforma anterior contiene una tabla de negocio adicional, detén el corte y agrégala explícitamente al script; las tablas internas de autenticación del proveedor no deben copiarse.
 
@@ -69,16 +70,18 @@ SELECT count(*) FROM processed_whatsapp_messages;
 
 Usa un dominio temporal o una entrada local de hosts para probar el VPS sin afectar producción.
 
-1. `GET /api/health` responde `200` y `{"status":"ok","database":"ok"}`.
-2. El administrador puede iniciar y cerrar sesión.
-3. El panel muestra los clientes y cuentas migradas.
-4. Se puede crear y validar un onboarding de prueba.
-5. La verificación `GET` del webhook devuelve exactamente el challenge con el token correcto y `403` con uno incorrecto.
-6. Un payload controlado se asocia al cliente correcto por `phone_number_id` y aparece en los logs.
-7. En ambiente de prueba, n8n y Chatwoot reciben un mensaje y no reciben los de otro cliente.
-8. El envío saliente usa la cuenta del cliente correcto.
+1. `GET /api/health/live` responde `200`; `GET /api/health/ready` confirma PostgreSQL y Redis.
+2. El servicio `worker` aparece saludable y su heartbeat se actualiza cada diez segundos.
+3. El administrador puede iniciar y cerrar sesión y abrir la sección **Operación**.
+4. El panel muestra los clientes, cuentas y métricas de trabajos pendientes/fallidos.
+5. Se puede crear y validar un onboarding de prueba.
+6. La verificación `GET` del webhook devuelve exactamente el challenge con el token correcto y `403` con uno incorrecto.
+7. Un `POST` con firma HMAC válida se guarda; firma inválida devuelve `401` y más de 1 MB devuelve `413`.
+8. Un payload controlado se asocia al cliente correcto por `phone_number_id` y aparece en los logs.
+9. En ambiente de prueba, n8n y Chatwoot reciben un mensaje y no reciben los de otro cliente.
+10. El envío saliente usa la cuenta del cliente correcto.
 
-Los puntos 7 y 8 requieren credenciales y sistemas externos reales; no se consideran aprobados sólo con una prueba local.
+Los puntos 9 y 10 requieren credenciales y sistemas externos reales; no se consideran aprobados sólo con una prueba local.
 
 ## 5. Corte con interrupción mínima
 
@@ -105,7 +108,7 @@ No ejecutes `docker compose down -v` en producción: `-v` elimina la base persis
 
 ## 7. Backups y actualización
 
-Programa un `pg_dump` diario hacia almacenamiento fuera del VPS y conserva al menos una copia cifrada externa. Prueba periódicamente la restauración en una base separada.
+Programa un `pg_dump` diario hacia almacenamiento fuera del VPS y conserva al menos una copia cifrada externa. Prueba periódicamente la restauración en una base separada. Redis no necesita respaldo histórico: su volumen AOF acelera la recuperación y el outbox PostgreSQL reconstruye trabajos faltantes.
 
 Para actualizar sin reescribir historial:
 
@@ -117,3 +120,5 @@ curl -fsS https://${DOMAIN}/api/health
 ```
 
 Antes de cada actualización toma un backup. Las migraciones se aplican al iniciar la nueva imagen.
+
+La prueba de carga aislada usa el perfil `test`; nunca lo levantes en producción ni ejecutes el sembrado sin `LOAD_TEST_ALLOWED=true` en una base desechable. El procedimiento y los criterios están en [operations.md](operations.md).

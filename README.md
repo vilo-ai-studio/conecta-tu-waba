@@ -8,10 +8,12 @@ Esta rama funciona sobre infraestructura propia. No requiere Lovable, Supabase n
 
 - Aplicación: TanStack Start sobre Node.js 22.
 - Base de datos: PostgreSQL 17 directo mediante `pg`.
+- Cola: Redis 7 con AOF y BullMQ; PostgreSQL conserva el outbox duradero.
+- Procesamiento: worker independiente con concurrencia inicial de 5 y orden por conversación.
 - Sesiones: cookie `HttpOnly` y tokens aleatorios almacenados como hash SHA-256.
 - Secretos operativos: AES-256-GCM con una clave externa `DATA_ENCRYPTION_KEY`.
 - Entrada HTTPS: Caddy con certificados automáticos.
-- Despliegue: Docker Compose con servicios `app`, `postgres` y `caddy`.
+- Despliegue: Docker Compose con servicios `app`, `worker`, `postgres`, `redis` y `caddy`.
 - Actualización del panel: polling corto; no depende de Supabase Realtime.
 
 ## Flujo principal
@@ -21,7 +23,8 @@ Esta rama funciona sobre infraestructura propia. No requiere Lovable, Supabase n
 3. El cliente completa Meta Embedded Signup en `/connect/:token`.
 4. El backend intercambia el código, almacena la cuenta y suscribe el WABA.
 5. Meta entrega los eventos a `/api/public/whatsapp/webhook`.
-6. El router encuentra al cliente y entrega el mensaje a su n8n o lo sincroniza con Chatwoot.
+6. El webhook valida la firma, guarda el evento y responde sin esperar integraciones externas.
+7. El worker encuentra al cliente y entrega el mensaje a n8n o lo sincroniza con Chatwoot.
 
 ## Desarrollo local
 
@@ -30,6 +33,7 @@ Requisitos: Node.js 22 y un PostgreSQL accesible.
 ```bash
 npm ci
 export DATABASE_URL='postgresql://usuario:password@127.0.0.1:5432/conecta_waba'
+export REDIS_URL='redis://127.0.0.1:6379'
 export DATABASE_SSL=disable
 npm run db:migrate
 npm run dev
@@ -62,6 +66,7 @@ curl -fsS https://tu-dominio/api/health
 
 ```bash
 npx tsc --noEmit
+npm test
 npm run build
 docker compose --env-file .env.vps config
 ```
@@ -70,6 +75,7 @@ docker compose --env-file .env.vps config
 
 - `.env` y `.env.vps` no se versionan.
 - PostgreSQL sólo existe dentro de la red privada de Compose; no publica el puerto 5432.
+- Redis sólo existe dentro de la red privada de Compose; no publica el puerto 6379.
 - La app publica su puerto únicamente en loopback y Caddy es la entrada pública.
 - `META_APP_SECRET`, los tokens de WhatsApp y secretos de n8n/Chatwoot nunca se envían al navegador; los secretos por cliente se cifran en PostgreSQL.
 - Configura backups diarios y prueba la restauración antes del corte definitivo.

@@ -2,6 +2,7 @@
 // Use dynamic `await import(...)` inside route/server-fn handlers.
 import { databaseAdmin } from "@/integrations/database/client.server";
 import { normalizeWaId } from "@/lib/wa-id";
+import { isRetryableHttpStatus, retryAfterMilliseconds } from "@/lib/retry-policy";
 
 export type ChatwootConfig = {
   client_id: string;
@@ -50,10 +51,11 @@ async function cwFetch(
   cfg: ChatwootConfig,
   path: string,
   init: RequestInit = {},
-): Promise<{ ok: boolean; status: number; body: any }> {
+): Promise<{ ok: boolean; status: number; body: any; retryAfterMs?: number }> {
   const url = `${cfg.base_url}${path}`;
   const res = await fetch(url, {
     ...init,
+    signal: init.signal ?? AbortSignal.timeout(Number(process.env.CHATWOOT_TIMEOUT_MS ?? 10_000)),
     headers: {
       "content-type": "application/json",
       api_access_token: cfg.api_token,
@@ -61,7 +63,38 @@ async function cwFetch(
     },
   });
   const body = await res.json().catch(() => ({}));
-  return { ok: res.ok, status: res.status, body };
+  return {
+    ok: res.ok,
+    status: res.status,
+    body,
+    retryAfterMs: retryAfterMilliseconds(res.headers.get("retry-after")),
+  };
+}
+
+class ChatwootRequestFailure extends Error {
+  constructor(
+    operation: string,
+    readonly status: number,
+    readonly retryable: boolean,
+    readonly retryAfterMs?: number,
+  ) {
+    super(`chatwoot_${operation}_http_${status}`);
+    this.name = "ChatwootRequestFailure";
+  }
+}
+
+function requireChatwootResponse(
+  operation: string,
+  response: { ok: boolean; status: number; retryAfterMs?: number },
+  allowedStatuses: number[] = [],
+): void {
+  if (response.ok || allowedStatuses.includes(response.status)) return;
+  throw new ChatwootRequestFailure(
+    operation,
+    response.status,
+    isRetryableHttpStatus(response.status),
+    response.retryAfterMs,
+  );
 }
 
 async function logCw(
@@ -103,10 +136,15 @@ async function ensureContact(
     cfg,
     `/api/v1/accounts/${cfg.account_id}/contacts/search?q=${encodeURIComponent(waId)}&include=contact_inboxes`,
   );
+  requireChatwootResponse("contact_search", search, [404]);
   let contactId: string | null = null;
   if (search.ok) {
     const payload = search.body?.payload;
-    const rows: any[] = Array.isArray(payload) ? payload : Array.isArray(payload?.data) ? payload.data : [];
+    const rows: any[] = Array.isArray(payload)
+      ? payload
+      : Array.isArray(payload?.data)
+        ? payload.data
+        : [];
     const match = rows.find(
       (c) => c?.identifier === waId || c?.phone_number === `+${waId}` || c?.phone_number === waId,
     );
@@ -125,30 +163,27 @@ async function ensureContact(
     });
     if (create.ok && create.body?.payload?.contact?.id) {
       contactId = String(create.body.payload.contact.id);
-    } else if (create.body?.payload?.contact?.id) {
-      contactId = String(create.body.payload.contact.id);
     } else {
       await logCw(cfg.client_id, "contact_create_failed", "outgoing", "error", {
         wa_id: waId,
         http_status: create.status,
         error_message: JSON.stringify(create.body).slice(0, 500),
       });
+      requireChatwootResponse("contact_create", create);
       return null;
     }
   }
 
-  await databaseAdmin
-    .from("chatwoot_contact_mappings")
-    .upsert(
-      {
-        client_id: cfg.client_id,
-        wa_id: waId,
-        phone: `+${waId}`,
-        profile_name: profileName,
-        chatwoot_contact_id: contactId,
-      } as any,
-      { onConflict: "client_id,wa_id" },
-    );
+  await databaseAdmin.from("chatwoot_contact_mappings").upsert(
+    {
+      client_id: cfg.client_id,
+      wa_id: waId,
+      phone: `+${waId}`,
+      profile_name: profileName,
+      chatwoot_contact_id: contactId,
+    } as any,
+    { onConflict: "client_id,wa_id" },
+  );
   return contactId;
 }
 
@@ -178,6 +213,7 @@ async function ensureConversation(
     cfg,
     `/api/v1/accounts/${cfg.account_id}/contacts/${contactId}/conversations`,
   );
+  requireChatwootResponse("conversation_list", list, [404]);
   let convId: string | null = null;
   let reusedFromChatwoot = false;
   if (list.ok) {
@@ -207,21 +243,20 @@ async function ensureConversation(
         http_status: create.status,
         error_message: JSON.stringify(create.body).slice(0, 500),
       });
+      requireChatwootResponse("conversation_create", create);
       return null;
     }
   }
 
-  await databaseAdmin
-    .from("chatwoot_conversation_mappings")
-    .upsert(
-      {
-        client_id: cfg.client_id,
-        wa_id: waId,
-        chatwoot_contact_id: contactId,
-        chatwoot_conversation_id: convId,
-      } as any,
-      { onConflict: "client_id,wa_id" },
-    );
+  await databaseAdmin.from("chatwoot_conversation_mappings").upsert(
+    {
+      client_id: cfg.client_id,
+      wa_id: waId,
+      chatwoot_contact_id: contactId,
+      chatwoot_conversation_id: convId,
+    } as any,
+    { onConflict: "client_id,wa_id" },
+  );
 
   // Re-read to detect if a concurrent handler beat us to creating the mapping.
   // Unique(client_id, wa_id) means the FIRST upsert wins; ours might have been
@@ -239,11 +274,15 @@ async function ensureConversation(
     finalConvId !== convId
       ? "chatwoot_prevented_duplicate_conversation"
       : reusedFromChatwoot
-      ? "chatwoot_conversation_mapping_reused"
-      : "chatwoot_conversation_mapping_created",
+        ? "chatwoot_conversation_mapping_reused"
+        : "chatwoot_conversation_mapping_created",
     null,
     "success",
-    { wa_id: waId, chatwoot_conversation_id: finalConvId, response_payload: { attempted_conversation_id: convId } },
+    {
+      wa_id: waId,
+      chatwoot_conversation_id: finalConvId,
+      response_payload: { attempted_conversation_id: convId },
+    },
   );
 
   return finalConvId;
@@ -255,7 +294,13 @@ async function postIncomingMessage(
   waMessageId: string | null,
   text: string | null,
   messageType: string | null,
-): Promise<{ ok: boolean; chatwoot_message_id: string | null; status: number; body: any }> {
+): Promise<{
+  ok: boolean;
+  chatwoot_message_id: string | null;
+  status: number;
+  body: any;
+  retryAfterMs?: number;
+}> {
   const payload: Record<string, any> = {
     content: text ?? `[${messageType ?? "message"}]`,
     message_type: "incoming",
@@ -275,6 +320,7 @@ async function postIncomingMessage(
     ok: res.ok,
     status: res.status,
     body: res.body,
+    retryAfterMs: res.retryAfterMs,
     chatwoot_message_id: res.body?.id ? String(res.body.id) : null,
   };
 }
@@ -288,16 +334,17 @@ async function refreshConversationState(
     cwFetch(cfg, `/api/v1/accounts/${cfg.account_id}/conversations/${convId}`),
     cwFetch(cfg, `/api/v1/accounts/${cfg.account_id}/conversations/${convId}/labels`),
   ]);
+  requireChatwootResponse("conversation_state", conv);
+  requireChatwootResponse("conversation_labels", labels);
   const labelList: string[] = Array.isArray(labels.body?.payload) ? labels.body.payload : [];
   const assigneeId = conv.body?.meta?.assignee?.id
     ? String(conv.body.meta.assignee.id)
     : conv.body?.assignee_id
-    ? String(conv.body.assignee_id)
-    : null;
+      ? String(conv.body.assignee_id)
+      : null;
   const status: string | null = conv.body?.status ?? null;
 
-  const bot_paused =
-    labelList.includes(cfg.pause_label) || (cfg.pause_on_assigned && !!assigneeId);
+  const bot_paused = labelList.includes(cfg.pause_label) || (cfg.pause_on_assigned && !!assigneeId);
 
   await databaseAdmin
     .from("chatwoot_conversation_mappings")
@@ -314,7 +361,7 @@ async function refreshConversationState(
 }
 
 export type ChatwootSyncResult =
-  | { synced: false; reason: string }
+  | { synced: false; reason: string; retryable?: boolean; retryAfterMs?: number }
   | {
       synced: true;
       bot_paused: boolean;
@@ -351,7 +398,11 @@ export async function syncInboundToChatwoot(params: {
         .eq("inbound_message_id", params.wa_message_id)
         .maybeSingle();
       if (dup.data?.chatwoot_conversation_id) {
-        const state = await refreshConversationState(cfg, dup.data.chatwoot_conversation_id, params.wa_id);
+        const state = await refreshConversationState(
+          cfg,
+          dup.data.chatwoot_conversation_id,
+          params.wa_id,
+        );
         return {
           synced: true,
           bot_paused:
@@ -378,6 +429,7 @@ export async function syncInboundToChatwoot(params: {
       params.text,
       params.message_type,
     );
+    requireChatwootResponse("message_create", msg);
 
     await databaseAdmin.from("chatwoot_message_mappings").insert({
       client_id: cfg.client_id,
@@ -411,8 +463,7 @@ export async function syncInboundToChatwoot(params: {
 
     const state = await refreshConversationState(cfg, convId, params.wa_id);
     const bot_paused =
-      state.labels.includes(cfg.pause_label) ||
-      (cfg.pause_on_assigned && !!state.assignee_id);
+      state.labels.includes(cfg.pause_label) || (cfg.pause_on_assigned && !!state.assignee_id);
 
     if (wasResolved && state.status && state.status !== "resolved") {
       await logCw(cfg.client_id, "conversation_reopened_by_inbound", "incoming", "success", {
@@ -442,7 +493,15 @@ export async function syncInboundToChatwoot(params: {
       wa_message_id: params.wa_message_id,
       error_message: String(err?.message ?? err).slice(0, 500),
     });
-    return { synced: false, reason: "exception" };
+    if (err instanceof ChatwootRequestFailure) {
+      return {
+        synced: false,
+        reason: err.message,
+        retryable: err.retryable,
+        retryAfterMs: err.retryAfterMs,
+      };
+    }
+    return { synced: false, reason: "exception", retryable: true };
   }
 }
 
@@ -507,11 +566,20 @@ export async function mirrorOutboundToChatwoot(params: {
         .eq("inbound_message_id", params.inbound_message_id)
         .maybeSingle();
       if (inboundMap?.chatwoot_conversation_id) {
-        await logCw(cfg.client_id, "chatwoot_outgoing_mirrored_to_existing_conversation", "outgoing", "success", {
-          wa_id: waId,
-          chatwoot_conversation_id: inboundMap.chatwoot_conversation_id,
-          response_payload: { resolved_via: "inbound_message_id", inbound_wa_id: inboundMap.wa_id },
-        });
+        await logCw(
+          cfg.client_id,
+          "chatwoot_outgoing_mirrored_to_existing_conversation",
+          "outgoing",
+          "success",
+          {
+            wa_id: waId,
+            chatwoot_conversation_id: inboundMap.chatwoot_conversation_id,
+            response_payload: {
+              resolved_via: "inbound_message_id",
+              inbound_wa_id: inboundMap.wa_id,
+            },
+          },
+        );
         convMap = {
           data: {
             chatwoot_conversation_id: inboundMap.chatwoot_conversation_id,
@@ -535,10 +603,16 @@ export async function mirrorOutboundToChatwoot(params: {
       if (!contactId) return { mirrored: false, reason: "contact_unavailable" };
       convId = await ensureConversation(cfg, waId, contactId);
     } else if (!resolvedFromInbound) {
-      await logCw(cfg.client_id, "chatwoot_outgoing_mirrored_to_existing_conversation", "outgoing", "success", {
-        wa_id: waId,
-        chatwoot_conversation_id: convId,
-      });
+      await logCw(
+        cfg.client_id,
+        "chatwoot_outgoing_mirrored_to_existing_conversation",
+        "outgoing",
+        "success",
+        {
+          wa_id: waId,
+          chatwoot_conversation_id: convId,
+        },
+      );
     }
     if (!convId) return { mirrored: false, reason: "conversation_unavailable" };
 
@@ -582,7 +656,11 @@ export async function mirrorOutboundToChatwoot(params: {
       error_message: res.ok ? null : JSON.stringify(res.body).slice(0, 500),
     });
 
-    return { mirrored: true, chatwoot_conversation_id: convId, chatwoot_message_id: chatwootMessageId };
+    return {
+      mirrored: true,
+      chatwoot_conversation_id: convId,
+      chatwoot_message_id: chatwootMessageId,
+    };
   } catch (err: any) {
     console.error("[chatwoot-sync] mirror error", err);
     await logCw(params.client_id, "outbound_mirror_error", "outgoing", "error", {
@@ -601,7 +679,9 @@ export async function mirrorOutboundToChatwoot(params: {
 export async function loadChatwootConfigForWebhook(
   chatwootAccountId: string,
   chatwootInboxId: string,
-): Promise<(ChatwootConfig & { webhook_secret: string | null; signature_enabled: boolean }) | null> {
+): Promise<
+  (ChatwootConfig & { webhook_secret: string | null; signature_enabled: boolean }) | null
+> {
   const { data, error } = await databaseAdmin
     .from("client_integrations")
     .select(
@@ -612,10 +692,7 @@ export async function loadChatwootConfigForWebhook(
     .eq("chatwoot_enabled", true)
     .maybeSingle();
   if (error || !data) return null;
-  if (
-    !data.chatwoot_base_url ||
-    !data.chatwoot_api_access_token_encrypted
-  ) return null;
+  if (!data.chatwoot_base_url || !data.chatwoot_api_access_token_encrypted) return null;
   return {
     client_id: data.client_id,
     base_url: normalizeBaseUrl(data.chatwoot_base_url),
@@ -731,11 +808,10 @@ export async function applyChatwootConversationState(params: {
   const labels: string[] = Array.isArray(params.labels)
     ? params.labels
     : Array.isArray(prior.data?.labels)
-    ? ((prior.data?.labels as any[]).filter((x) => typeof x === "string") as string[])
-    : [];
+      ? ((prior.data?.labels as any[]).filter((x) => typeof x === "string") as string[])
+      : [];
   const bot_paused =
-    labels.includes(params.pause_label) ||
-    (params.pause_on_assigned && !!params.assignee_id);
+    labels.includes(params.pause_label) || (params.pause_on_assigned && !!params.assignee_id);
 
   const patch: Record<string, any> = { bot_paused, labels };
   if (params.status != null) patch.status = params.status;

@@ -177,9 +177,7 @@ export const updateChatwootConfig = createServerFn({ method: "POST" })
         .eq("id", existing.id);
       error = uErr;
     } else {
-      const { error: iErr } = await databaseAdmin
-        .from("client_integrations")
-        .insert(patch as any);
+      const { error: iErr } = await databaseAdmin.from("client_integrations").insert(patch as any);
       error = iErr;
     }
     if (error) throw new Error(error.message);
@@ -208,7 +206,11 @@ export const testChatwootConnection = createServerFn({ method: "POST" })
     if (!cfg) {
       return { ok: false, error: "Chatwoot no está configurado para este cliente." };
     }
-    if (!cfg.chatwoot_base_url || !cfg.chatwoot_account_id || !cfg.chatwoot_api_access_token_encrypted) {
+    if (
+      !cfg.chatwoot_base_url ||
+      !cfg.chatwoot_account_id ||
+      !cfg.chatwoot_api_access_token_encrypted
+    ) {
       return { ok: false, error: "Faltan base_url, account_id o api_access_token." };
     }
 
@@ -229,6 +231,7 @@ export const testChatwootConnection = createServerFn({ method: "POST" })
           "content-type": "application/json",
           api_access_token: cfg.chatwoot_api_access_token_encrypted,
         },
+        signal: AbortSignal.timeout(Number(process.env.CHATWOOT_TIMEOUT_MS ?? 10_000)),
       });
       httpStatus = res.status;
       body = await res.json().catch(() => ({}));
@@ -238,9 +241,7 @@ export const testChatwootConnection = createServerFn({ method: "POST" })
     }
 
     const now = new Date().toISOString();
-    const errMsg = !ok
-      ? netErr ?? body?.message ?? body?.error ?? `HTTP ${httpStatus}`
-      : null;
+    const errMsg = !ok ? (netErr ?? body?.message ?? body?.error ?? `HTTP ${httpStatus}`) : null;
 
     await databaseAdmin.from("chatwoot_integration_logs").insert({
       client_id: data.client_id,

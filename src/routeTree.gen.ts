@@ -14,12 +14,16 @@ import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as OnboardingRouteImport } from './routes/onboarding'
 import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
+import { Route as AuthenticatedOperationsRouteImport } from './routes/_authenticated/operations'
 import { Route as ApiHealthRouteImport } from './routes/api/health'
 import { Route as ConnectTokenRouteImport } from './routes/connect.$token'
 import { Route as AuthenticatedClientsIdRouteImport } from './routes/_authenticated/clients.$id'
 import { Route as ApiAuthLoginRouteImport } from './routes/api/auth/login'
 import { Route as ApiAuthLogoutRouteImport } from './routes/api/auth/logout'
 import { Route as ApiAuthSessionRouteImport } from './routes/api/auth/session'
+import { Route as ApiHealthDetailsRouteImport } from './routes/api/health.details'
+import { Route as ApiHealthLiveRouteImport } from './routes/api/health.live'
+import { Route as ApiHealthReadyRouteImport } from './routes/api/health.ready'
 import { Route as ApiPublicMetaConfigRouteImport } from './routes/api/public/meta-config'
 import { Route as ApiPublicChatwootWebhookRouteImport } from './routes/api/public/chatwoot/webhook'
 import { Route as ApiPublicOnboardingCompleteRouteImport } from './routes/api/public/onboarding/complete'
@@ -52,6 +56,11 @@ const AuthenticatedDashboardRoute = AuthenticatedDashboardRouteImport.update({
   path: '/dashboard',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedOperationsRoute = AuthenticatedOperationsRouteImport.update({
+  id: '/operations',
+  path: '/operations',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 const ApiHealthRoute = ApiHealthRouteImport.update({
   id: '/api/health',
   path: '/api/health',
@@ -81,6 +90,21 @@ const ApiAuthSessionRoute = ApiAuthSessionRouteImport.update({
   id: '/api/auth/session',
   path: '/api/auth/session',
   getParentRoute: () => rootRouteImport,
+} as any)
+const ApiHealthDetailsRoute = ApiHealthDetailsRouteImport.update({
+  id: '/details',
+  path: '/details',
+  getParentRoute: () => ApiHealthRoute,
+} as any)
+const ApiHealthLiveRoute = ApiHealthLiveRouteImport.update({
+  id: '/live',
+  path: '/live',
+  getParentRoute: () => ApiHealthRoute,
+} as any)
+const ApiHealthReadyRoute = ApiHealthReadyRouteImport.update({
+  id: '/ready',
+  path: '/ready',
+  getParentRoute: () => ApiHealthRoute,
 } as any)
 const ApiPublicMetaConfigRoute = ApiPublicMetaConfigRouteImport.update({
   id: '/api/public/meta-config',
@@ -129,12 +153,16 @@ export interface FileRoutesByFullPath {
   '/auth': typeof AuthRoute
   '/onboarding': typeof OnboardingRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
-  '/api/health': typeof ApiHealthRoute
+  '/operations': typeof AuthenticatedOperationsRoute
+  '/api/health': typeof ApiHealthRouteWithChildren
   '/connect/$token': typeof ConnectTokenRoute
   '/clients/$id': typeof AuthenticatedClientsIdRoute
   '/api/auth/login': typeof ApiAuthLoginRoute
   '/api/auth/logout': typeof ApiAuthLogoutRoute
   '/api/auth/session': typeof ApiAuthSessionRoute
+  '/api/health/details': typeof ApiHealthDetailsRoute
+  '/api/health/live': typeof ApiHealthLiveRoute
+  '/api/health/ready': typeof ApiHealthReadyRoute
   '/api/public/meta-config': typeof ApiPublicMetaConfigRoute
   '/api/public/chatwoot/webhook': typeof ApiPublicChatwootWebhookRoute
   '/api/public/onboarding/complete': typeof ApiPublicOnboardingCompleteRoute
@@ -148,12 +176,16 @@ export interface FileRoutesByTo {
   '/auth': typeof AuthRoute
   '/onboarding': typeof OnboardingRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
-  '/api/health': typeof ApiHealthRoute
+  '/operations': typeof AuthenticatedOperationsRoute
+  '/api/health': typeof ApiHealthRouteWithChildren
   '/connect/$token': typeof ConnectTokenRoute
   '/clients/$id': typeof AuthenticatedClientsIdRoute
   '/api/auth/login': typeof ApiAuthLoginRoute
   '/api/auth/logout': typeof ApiAuthLogoutRoute
   '/api/auth/session': typeof ApiAuthSessionRoute
+  '/api/health/details': typeof ApiHealthDetailsRoute
+  '/api/health/live': typeof ApiHealthLiveRoute
+  '/api/health/ready': typeof ApiHealthReadyRoute
   '/api/public/meta-config': typeof ApiPublicMetaConfigRoute
   '/api/public/chatwoot/webhook': typeof ApiPublicChatwootWebhookRoute
   '/api/public/onboarding/complete': typeof ApiPublicOnboardingCompleteRoute
@@ -169,12 +201,16 @@ export interface FileRoutesById {
   '/auth': typeof AuthRoute
   '/onboarding': typeof OnboardingRoute
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
-  '/api/health': typeof ApiHealthRoute
+  '/_authenticated/operations': typeof AuthenticatedOperationsRoute
+  '/api/health': typeof ApiHealthRouteWithChildren
   '/connect/$token': typeof ConnectTokenRoute
   '/_authenticated/clients/$id': typeof AuthenticatedClientsIdRoute
   '/api/auth/login': typeof ApiAuthLoginRoute
   '/api/auth/logout': typeof ApiAuthLogoutRoute
   '/api/auth/session': typeof ApiAuthSessionRoute
+  '/api/health/details': typeof ApiHealthDetailsRoute
+  '/api/health/live': typeof ApiHealthLiveRoute
+  '/api/health/ready': typeof ApiHealthReadyRoute
   '/api/public/meta-config': typeof ApiPublicMetaConfigRoute
   '/api/public/chatwoot/webhook': typeof ApiPublicChatwootWebhookRoute
   '/api/public/onboarding/complete': typeof ApiPublicOnboardingCompleteRoute
@@ -190,12 +226,16 @@ export interface FileRouteTypes {
     | '/auth'
     | '/onboarding'
     | '/dashboard'
+    | '/operations'
     | '/api/health'
     | '/connect/$token'
     | '/clients/$id'
     | '/api/auth/login'
     | '/api/auth/logout'
     | '/api/auth/session'
+    | '/api/health/details'
+    | '/api/health/live'
+    | '/api/health/ready'
     | '/api/public/meta-config'
     | '/api/public/chatwoot/webhook'
     | '/api/public/onboarding/complete'
@@ -209,12 +249,16 @@ export interface FileRouteTypes {
     | '/auth'
     | '/onboarding'
     | '/dashboard'
+    | '/operations'
     | '/api/health'
     | '/connect/$token'
     | '/clients/$id'
     | '/api/auth/login'
     | '/api/auth/logout'
     | '/api/auth/session'
+    | '/api/health/details'
+    | '/api/health/live'
+    | '/api/health/ready'
     | '/api/public/meta-config'
     | '/api/public/chatwoot/webhook'
     | '/api/public/onboarding/complete'
@@ -229,12 +273,16 @@ export interface FileRouteTypes {
     | '/auth'
     | '/onboarding'
     | '/_authenticated/dashboard'
+    | '/_authenticated/operations'
     | '/api/health'
     | '/connect/$token'
     | '/_authenticated/clients/$id'
     | '/api/auth/login'
     | '/api/auth/logout'
     | '/api/auth/session'
+    | '/api/health/details'
+    | '/api/health/live'
+    | '/api/health/ready'
     | '/api/public/meta-config'
     | '/api/public/chatwoot/webhook'
     | '/api/public/onboarding/complete'
@@ -249,7 +297,7 @@ export interface RootRouteChildren {
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
   OnboardingRoute: typeof OnboardingRoute
-  ApiHealthRoute: typeof ApiHealthRoute
+  ApiHealthRoute: typeof ApiHealthRouteWithChildren
   ConnectTokenRoute: typeof ConnectTokenRoute
   ApiAuthLoginRoute: typeof ApiAuthLoginRoute
   ApiAuthLogoutRoute: typeof ApiAuthLogoutRoute
@@ -300,6 +348,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedDashboardRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/operations': {
+      id: '/_authenticated/operations'
+      path: '/operations'
+      fullPath: '/operations'
+      preLoaderRoute: typeof AuthenticatedOperationsRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/api/health': {
       id: '/api/health'
       path: '/api/health'
@@ -341,6 +396,27 @@ declare module '@tanstack/react-router' {
       fullPath: '/api/auth/session'
       preLoaderRoute: typeof ApiAuthSessionRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/api/health/details': {
+      id: '/api/health/details'
+      path: '/details'
+      fullPath: '/api/health/details'
+      preLoaderRoute: typeof ApiHealthDetailsRouteImport
+      parentRoute: typeof ApiHealthRoute
+    }
+    '/api/health/live': {
+      id: '/api/health/live'
+      path: '/live'
+      fullPath: '/api/health/live'
+      preLoaderRoute: typeof ApiHealthLiveRouteImport
+      parentRoute: typeof ApiHealthRoute
+    }
+    '/api/health/ready': {
+      id: '/api/health/ready'
+      path: '/ready'
+      fullPath: '/api/health/ready'
+      preLoaderRoute: typeof ApiHealthReadyRouteImport
+      parentRoute: typeof ApiHealthRoute
     }
     '/api/public/meta-config': {
       id: '/api/public/meta-config'
@@ -396,23 +472,41 @@ declare module '@tanstack/react-router' {
 
 interface AuthenticatedRouteRouteChildren {
   AuthenticatedDashboardRoute: typeof AuthenticatedDashboardRoute
+  AuthenticatedOperationsRoute: typeof AuthenticatedOperationsRoute
   AuthenticatedClientsIdRoute: typeof AuthenticatedClientsIdRoute
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedDashboardRoute: AuthenticatedDashboardRoute,
+  AuthenticatedOperationsRoute: AuthenticatedOperationsRoute,
   AuthenticatedClientsIdRoute: AuthenticatedClientsIdRoute,
 }
 
 const AuthenticatedRouteRouteWithChildren =
   AuthenticatedRouteRoute._addFileChildren(AuthenticatedRouteRouteChildren)
 
+interface ApiHealthRouteChildren {
+  ApiHealthDetailsRoute: typeof ApiHealthDetailsRoute
+  ApiHealthLiveRoute: typeof ApiHealthLiveRoute
+  ApiHealthReadyRoute: typeof ApiHealthReadyRoute
+}
+
+const ApiHealthRouteChildren: ApiHealthRouteChildren = {
+  ApiHealthDetailsRoute: ApiHealthDetailsRoute,
+  ApiHealthLiveRoute: ApiHealthLiveRoute,
+  ApiHealthReadyRoute: ApiHealthReadyRoute,
+}
+
+const ApiHealthRouteWithChildren = ApiHealthRoute._addFileChildren(
+  ApiHealthRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
   OnboardingRoute: OnboardingRoute,
-  ApiHealthRoute: ApiHealthRoute,
+  ApiHealthRoute: ApiHealthRouteWithChildren,
   ConnectTokenRoute: ConnectTokenRoute,
   ApiAuthLoginRoute: ApiAuthLoginRoute,
   ApiAuthLogoutRoute: ApiAuthLogoutRoute,

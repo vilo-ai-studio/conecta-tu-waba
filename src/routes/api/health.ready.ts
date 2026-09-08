@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { checkDatabase } from "@/integrations/database/client.server";
 import { getRedis } from "@/lib/queue.server";
 
-export const Route = createFileRoute("/api/health")({
+export const Route = createFileRoute("/api/health/ready")({
   server: {
     handlers: {
       GET: async () => {
@@ -11,11 +11,11 @@ export const Route = createFileRoute("/api/health")({
           database: database.status === "fulfilled" ? "ok" : "error",
           redis: redis.status === "fulfilled" ? "ok" : "error",
         };
-        const healthy = database.status === "fulfilled" && redis.status === "fulfilled";
-        if (!healthy) console.error("[health] dependency unavailable", components);
+        const ready = database.status === "fulfilled" && redis.status === "fulfilled";
+        if (!ready) console.error("[readiness] dependency unavailable", components);
         return Response.json(
-          { status: healthy ? "ok" : "error", ...components },
-          { status: healthy ? 200 : 503 },
+          { status: ready ? "ok" : "error", ...components },
+          { status: ready ? 200 : 503 },
         );
       },
     },

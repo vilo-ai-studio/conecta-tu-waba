@@ -1,8 +1,18 @@
 import { createFileRoute, Outlet, redirect, Link, useNavigate } from "@tanstack/react-router";
 import { authClient } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
-import { Activity, Building2, ChevronDown, LogOut, Network, Server } from "lucide-react";
-import { useQueryClient } from "@tanstack/react-query";
+import {
+  Activity,
+  AlertTriangle,
+  Building2,
+  ChevronDown,
+  LogOut,
+  Network,
+  Server,
+} from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useServerFn } from "@tanstack/react-start";
+import { getQueueMetrics } from "@/lib/operations.functions";
 import { BrandMark } from "@/components/brand/BrandMark";
 import {
   DropdownMenu,
@@ -27,6 +37,13 @@ function AuthedLayout() {
   const { user } = Route.useRouteContext();
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const metricsFn = useServerFn(getQueueMetrics);
+  const metrics = useQuery({
+    queryKey: ["queue-navigation-metrics"],
+    queryFn: () => metricsFn(),
+    refetchInterval: 15_000,
+    retry: false,
+  });
 
   const signOut = async () => {
     await qc.cancelQueries();
@@ -54,6 +71,23 @@ function AuthedLayout() {
           >
             <Building2 className="h-4 w-4" />
             Clientes y rutas
+          </Link>
+          <Link
+            to="/operations"
+            className="mt-1 flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+            activeProps={{
+              className:
+                "mt-1 flex items-center gap-3 rounded-lg bg-accent px-3 py-2.5 text-sm font-semibold text-accent-foreground shadow-sm",
+            }}
+          >
+            <Activity className="h-4 w-4" />
+            Estado operativo
+            {(metrics.data?.failed ?? 0) > 0 && (
+              <span className="ml-auto inline-flex items-center gap-1 rounded-full bg-destructive/15 px-2 py-0.5 text-[11px] font-semibold text-destructive">
+                <AlertTriangle className="h-3 w-3" />
+                {metrics.data?.failed}
+              </span>
+            )}
           </Link>
 
           <div className="mt-8">

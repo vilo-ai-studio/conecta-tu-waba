@@ -47,8 +47,8 @@ export const Route = createFileRoute("/api/public/chatwoot/webhook")({
           (event?.conversation?.inbox_id != null
             ? String(event.conversation.inbox_id)
             : event?.messages?.[0]?.inbox_id != null
-            ? String(event.messages[0].inbox_id)
-            : null);
+              ? String(event.messages[0].inbox_id)
+              : null);
 
         if (!accountId || !effectiveInboxId) {
           return Response.json({ ok: true, ignored: "missing_account_or_inbox" });
@@ -74,16 +74,20 @@ export const Route = createFileRoute("/api/public/chatwoot/webhook")({
         const signature = request.headers.get("x-chatwoot-signature") ?? "";
         if (cfg.signature_enabled && cfg.webhook_secret) {
           try {
-            const expected = createHmac("sha256", cfg.webhook_secret)
-              .update(rawBody)
-              .digest("hex");
+            const expected = createHmac("sha256", cfg.webhook_secret).update(rawBody).digest("hex");
             const a = Buffer.from(signature);
             const b = Buffer.from(expected);
             const valid = a.length === b.length && timingSafeEqual(a, b);
             if (!valid) {
-              await logChatwootEvent(cfg.client_id, "webhook_invalid_signature", "incoming", "error", {
-                event_type: eventType,
-              });
+              await logChatwootEvent(
+                cfg.client_id,
+                "webhook_invalid_signature",
+                "incoming",
+                "error",
+                {
+                  event_type: eventType,
+                },
+              );
               return new Response("invalid signature", { status: 401 });
             }
           } catch (err) {
@@ -118,21 +122,23 @@ export const Route = createFileRoute("/api/public/chatwoot/webhook")({
             event?.id != null
               ? String(event.id)
               : event?.conversation?.id != null
-              ? String(event.conversation.id)
-              : null;
+                ? String(event.conversation.id)
+                : null;
           if (!convId) return Response.json({ ok: true, ignored: "no_conversation_id" });
 
           const labelsField = event?.labels ?? event?.additional_attributes?.labels ?? null;
           const labels: string[] | null = Array.isArray(labelsField)
-            ? labelsField.map((l: any) => (typeof l === "string" ? l : l?.title ?? "")).filter(Boolean)
+            ? labelsField
+                .map((l: any) => (typeof l === "string" ? l : (l?.title ?? "")))
+                .filter(Boolean)
             : null;
           const status: string | null = event?.status ?? event?.conversation?.status ?? null;
           const assigneeId =
             event?.meta?.assignee?.id != null
               ? String(event.meta.assignee.id)
               : event?.assignee_id != null
-              ? String(event.assignee_id)
-              : null;
+                ? String(event.assignee_id)
+                : null;
 
           const applied = await applyChatwootConversationState({
             client_id: cfg.client_id,
@@ -169,17 +175,29 @@ export const Route = createFileRoute("/api/public/chatwoot/webhook")({
         // Below: message_created — only the API Inbox webhook forwards to Meta.
         // The global webhook drops message_created to avoid double-processing.
         if (eventType !== "message_created") {
-          await logChatwootEvent(cfg.client_id, `webhook_${eventType || "unknown"}`, "incoming", "ignored", {
-            event_type: eventType,
-          });
+          await logChatwootEvent(
+            cfg.client_id,
+            `webhook_${eventType || "unknown"}`,
+            "incoming",
+            "ignored",
+            {
+              event_type: eventType,
+            },
+          );
           return Response.json({ ok: true, ignored: "unhandled_event" });
         }
 
         if (kind === "global") {
-          await logChatwootEvent(cfg.client_id, "chatwoot_duplicate_message_ignored", "incoming", "ignored", {
-            event_type: eventType,
-            response_payload: { reason: "message_created_on_global_webhook" },
-          });
+          await logChatwootEvent(
+            cfg.client_id,
+            "chatwoot_duplicate_message_ignored",
+            "incoming",
+            "ignored",
+            {
+              event_type: eventType,
+              response_payload: { reason: "message_created_on_global_webhook" },
+            },
+          );
           return Response.json({ ok: true, ignored: "message_created_on_global_webhook" });
         }
 
@@ -193,19 +211,25 @@ export const Route = createFileRoute("/api/public/chatwoot/webhook")({
           event?.conversation?.id != null
             ? String(event.conversation.id)
             : event?.conversation_id != null
-            ? String(event.conversation_id)
-            : null;
+              ? String(event.conversation_id)
+              : null;
 
         if (!chatwootMessageId || !conversationId) {
           return Response.json({ ok: true, ignored: "missing_ids" });
         }
 
         if (messageType !== "outgoing" || isPrivate) {
-          await logChatwootEvent(cfg.client_id, "webhook_ignored_not_outgoing", "incoming", "ignored", {
-            chatwoot_message_id: chatwootMessageId,
-            chatwoot_conversation_id: conversationId,
-            event_type: eventType,
-          });
+          await logChatwootEvent(
+            cfg.client_id,
+            "webhook_ignored_not_outgoing",
+            "incoming",
+            "ignored",
+            {
+              chatwoot_message_id: chatwootMessageId,
+              chatwoot_conversation_id: conversationId,
+              event_type: eventType,
+            },
+          );
           return Response.json({ ok: true, ignored: "not_public_outgoing" });
         }
 
@@ -229,11 +253,17 @@ export const Route = createFileRoute("/api/public/chatwoot/webhook")({
         // Only accept messages sent by human agents ("user"). Bot integrations
         // sometimes appear with sender.type === "agent_bot".
         if (senderType && senderType !== "user" && senderType !== "User") {
-          await logChatwootEvent(cfg.client_id, "webhook_ignored_non_agent", "incoming", "ignored", {
-            chatwoot_message_id: chatwootMessageId,
-            chatwoot_conversation_id: conversationId,
-            sender_type: senderType,
-          });
+          await logChatwootEvent(
+            cfg.client_id,
+            "webhook_ignored_non_agent",
+            "incoming",
+            "ignored",
+            {
+              chatwoot_message_id: chatwootMessageId,
+              chatwoot_conversation_id: conversationId,
+              sender_type: senderType,
+            },
+          );
           return Response.json({ ok: true, ignored: "non_human_sender" });
         }
 
@@ -242,7 +272,7 @@ export const Route = createFileRoute("/api/public/chatwoot/webhook")({
           return Response.json({ ok: true, ignored: "empty_content" });
         }
 
-    const { databaseAdmin } = await import("@/integrations/database/client.server");
+        const { databaseAdmin } = await import("@/integrations/database/client.server");
 
         // Strict dedup: RESERVE the chatwoot_message_id BEFORE calling Meta.
         // Unique index (client_id, chatwoot_message_id) rejects a duplicate,
@@ -339,6 +369,7 @@ export const Route = createFileRoute("/api/public/chatwoot/webhook")({
               authorization: `Bearer ${acct.token_encrypted}`,
             },
             body: JSON.stringify(metaBody),
+            signal: AbortSignal.timeout(Number(process.env.META_TIMEOUT_MS ?? 15_000)),
           });
           httpStatus = res.status;
           metaJson = await res.json().catch(() => ({}));
@@ -347,9 +378,9 @@ export const Route = createFileRoute("/api/public/chatwoot/webhook")({
           networkErr = String(err?.message ?? err).slice(0, 500);
         }
 
-        const metaMessageId = ok ? metaJson?.messages?.[0]?.id ?? null : null;
+        const metaMessageId = ok ? (metaJson?.messages?.[0]?.id ?? null) : null;
         const errMsg = !ok
-          ? metaJson?.error?.message ?? networkErr ?? `HTTP ${httpStatus}`
+          ? (metaJson?.error?.message ?? networkErr ?? `HTTP ${httpStatus}`)
           : null;
 
         await databaseAdmin.from("whatsapp_send_logs").insert({
@@ -366,7 +397,8 @@ export const Route = createFileRoute("/api/public/chatwoot/webhook")({
           meta_message_status: ok ? "accepted" : null,
           success: ok,
           error_code: metaJson?.error?.code != null ? String(metaJson.error.code) : null,
-          error_subcode: metaJson?.error?.error_subcode != null ? String(metaJson.error.error_subcode) : null,
+          error_subcode:
+            metaJson?.error?.error_subcode != null ? String(metaJson.error.error_subcode) : null,
           error_type: metaJson?.error?.type ?? (networkErr ? "network_error" : null),
           error_message: errMsg,
           fbtrace_id: metaJson?.error?.fbtrace_id ?? null,

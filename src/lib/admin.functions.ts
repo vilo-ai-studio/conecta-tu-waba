@@ -271,6 +271,7 @@ export const sendN8nTestEvent = createServerFn({ method: "POST" })
             : {}),
         },
         body: JSON.stringify(testPayload),
+        signal: AbortSignal.timeout(Number(process.env.N8N_TIMEOUT_MS ?? 10_000)),
       });
       responseStatus = res.status;
       responseBody = (await res.text().catch(() => "")).slice(0, 4000);

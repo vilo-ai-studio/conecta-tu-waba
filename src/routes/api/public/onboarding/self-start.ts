@@ -1,4 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
+import {
+  BodyTooLargeError,
+  enforceRateLimit,
+  readJsonWithLimit,
+  requestIp,
+} from "@/lib/request-security.server";
 
 // Public self-service onboarding start.
 // Creates a `clients` row (status = onboarding_started), a pending
@@ -12,12 +18,19 @@ export const Route = createFileRoute("/api/public/onboarding/self-start")({
     handlers: {
       POST: async ({ request }) => {
         try {
-          const body = (await request.json()) as {
+          const limited = await enforceRateLimit({
+            key: `onboarding:${requestIp(request)}`,
+            limit: 10,
+            windowSeconds: 60,
+          });
+          if (limited) return limited;
+          const body = await readJsonWithLimit<{
             name?: string;
             email?: string;
             company_name?: string;
             phone?: string;
-          };
+          }>(request, 32_768);
+          if (!body) return Response.json({ ok: false, error: "invalid_json" }, { status: 400 });
 
           const name = (body.name ?? "").trim();
           const email = (body.email ?? "").trim();
@@ -30,7 +43,7 @@ export const Route = createFileRoute("/api/public/onboarding/self-start")({
             return Response.json({ ok: false, error: "invalid_email" }, { status: 400 });
           }
 
-    const { databaseAdmin } = await import("@/integrations/database/client.server");
+          const { databaseAdmin } = await import("@/integrations/database/client.server");
 
           // 1) Create client
           const { data: client, error: cErr } = await databaseAdmin
@@ -72,6 +85,9 @@ export const Route = createFileRoute("/api/public/onboarding/self-start")({
 
           return Response.json({ ok: true, token });
         } catch (err) {
+          if (err instanceof BodyTooLargeError) {
+            return Response.json({ ok: false, error: "payload_too_large" }, { status: 413 });
+          }
           console.error("[onboarding.self-start] unexpected", err);
           return Response.json({ ok: false, error: "server_error" }, { status: 500 });
         }

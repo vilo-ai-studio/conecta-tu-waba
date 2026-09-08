@@ -1,4 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
+import {
+  BodyTooLargeError,
+  enforceRateLimit,
+  readJsonWithLimit,
+  requestIp,
+} from "@/lib/request-security.server";
 
 // Called by the public onboarding page after Meta Embedded Signup succeeds.
 // Exchanges the temporary code for a long-lived access token, stores it,
@@ -12,25 +18,36 @@ export const Route = createFileRoute("/api/public/onboarding/complete")({
     handlers: {
       POST: async ({ request }) => {
         try {
-          const body = (await request.json()) as {
+          const limited = await enforceRateLimit({
+            key: `onboarding:${requestIp(request)}`,
+            limit: 10,
+            windowSeconds: 60,
+          });
+          if (limited) return limited;
+          const body = await readJsonWithLimit<{
             token?: string;
             code?: string;
             waba_id?: string;
             phone_number_id?: string;
             business_id?: string;
-          };
+          }>(request, 32_768);
+          if (!body) return Response.json({ ok: false, error: "invalid_json" }, { status: 400 });
           if (!body.token || !body.code) {
             return Response.json({ ok: false, error: "missing_params" }, { status: 400 });
           }
 
           if (!body.waba_id || !body.phone_number_id) {
             return Response.json(
-              { ok: false, error: "missing_meta_ids", detail: "Meta must return code, WABA ID and Phone Number ID." },
+              {
+                ok: false,
+                error: "missing_meta_ids",
+                detail: "Meta must return code, WABA ID and Phone Number ID.",
+              },
               { status: 400 },
             );
           }
 
-    const { databaseAdmin } = await import("@/integrations/database/client.server");
+          const { databaseAdmin } = await import("@/integrations/database/client.server");
 
           // 1) Validate onboarding link
           const { data: link, error: linkErr } = await databaseAdmin
@@ -42,7 +59,8 @@ export const Route = createFileRoute("/api/public/onboarding/complete")({
             console.error("[onboarding.complete] link not found", linkErr);
             return Response.json({ ok: false, error: "invalid_token" }, { status: 404 });
           }
-          if (link.used_at) return Response.json({ ok: false, error: "already_used" }, { status: 410 });
+          if (link.used_at)
+            return Response.json({ ok: false, error: "already_used" }, { status: 410 });
           if (link.expires_at && new Date(link.expires_at) < new Date()) {
             return Response.json({ ok: false, error: "expired" }, { status: 410 });
           }
@@ -56,7 +74,10 @@ export const Route = createFileRoute("/api/public/onboarding/complete")({
           }
 
           // Mark client as in_progress
-          await databaseAdmin.from("clients").update({ status: "in_progress" }).eq("id", link.client_id);
+          await databaseAdmin
+            .from("clients")
+            .update({ status: "in_progress" })
+            .eq("id", link.client_id);
 
           // 2) Exchange code -> access_token
           // TODO Meta: confirm exact endpoint/params for Embedded Signup (Tech Provider / Coexistence flow).
@@ -66,12 +87,21 @@ export const Route = createFileRoute("/api/public/onboarding/complete")({
           tokenUrl.searchParams.set("code", body.code);
           // TODO Meta: if Embedded Signup requires redirect_uri, set it here to the same value used by the SDK.
 
-          const tokenRes = await fetch(tokenUrl.toString(), { method: "GET" });
+          const tokenRes = await fetch(tokenUrl.toString(), {
+            method: "GET",
+            signal: AbortSignal.timeout(Number(process.env.META_TIMEOUT_MS ?? 15_000)),
+          });
           const tokenJson: any = await tokenRes.json();
           if (!tokenRes.ok || !tokenJson.access_token) {
             console.error("[onboarding.complete] token exchange failed", tokenJson);
-            await databaseAdmin.from("clients").update({ status: "onboarding_error" }).eq("id", link.client_id);
-            return Response.json({ ok: false, error: "token_exchange_failed", detail: tokenJson }, { status: 502 });
+            await databaseAdmin
+              .from("clients")
+              .update({ status: "onboarding_error" })
+              .eq("id", link.client_id);
+            return Response.json(
+              { ok: false, error: "token_exchange_failed", detail: tokenJson },
+              { status: 502 },
+            );
           }
           const accessToken: string = tokenJson.access_token;
 
@@ -80,10 +110,14 @@ export const Route = createFileRoute("/api/public/onboarding/complete")({
           if (body.phone_number_id) {
             const phoneRes = await fetch(
               `https://graph.facebook.com/${version}/${body.phone_number_id}?fields=display_phone_number,verified_name,id`,
-              { headers: { Authorization: `Bearer ${accessToken}` } },
+              {
+                headers: { Authorization: `Bearer ${accessToken}` },
+                signal: AbortSignal.timeout(Number(process.env.META_TIMEOUT_MS ?? 15_000)),
+              },
             );
             phoneDetails = await phoneRes.json();
-            if (!phoneRes.ok) console.warn("[onboarding.complete] phone lookup failed", phoneDetails);
+            if (!phoneRes.ok)
+              console.warn("[onboarding.complete] phone lookup failed", phoneDetails);
           }
 
           // 4) Subscribe app to WABA
@@ -91,10 +125,15 @@ export const Route = createFileRoute("/api/public/onboarding/complete")({
           if (body.waba_id) {
             const subRes = await fetch(
               `https://graph.facebook.com/${version}/${body.waba_id}/subscribed_apps`,
-              { method: "POST", headers: { Authorization: `Bearer ${accessToken}` } },
+              {
+                method: "POST",
+                headers: { Authorization: `Bearer ${accessToken}` },
+                signal: AbortSignal.timeout(Number(process.env.META_TIMEOUT_MS ?? 15_000)),
+              },
             );
             const subJson: any = await subRes.json().catch(() => ({}));
-            webhookSubscribed = subRes.ok && (subJson.success === true || subJson.data !== undefined);
+            webhookSubscribed =
+              subRes.ok && (subJson.success === true || subJson.data !== undefined);
             if (!subRes.ok) console.warn("[onboarding.complete] subscribe failed", subJson);
           }
 
@@ -140,16 +179,28 @@ export const Route = createFileRoute("/api/public/onboarding/complete")({
           }
           if (waErr) {
             console.error("[onboarding.complete] db upsert failed", waErr);
-            await databaseAdmin.from("clients").update({ status: "onboarding_error" }).eq("id", link.client_id);
+            await databaseAdmin
+              .from("clients")
+              .update({ status: "onboarding_error" })
+              .eq("id", link.client_id);
             return Response.json({ ok: false, error: "db_error" }, { status: 500 });
           }
 
           // 6) Mark link used + client connected
-          await databaseAdmin.from("onboarding_links").update({ used_at: new Date().toISOString() }).eq("id", link.id);
-          await databaseAdmin.from("clients").update({ status: "connected" }).eq("id", link.client_id);
+          await databaseAdmin
+            .from("onboarding_links")
+            .update({ used_at: new Date().toISOString() })
+            .eq("id", link.id);
+          await databaseAdmin
+            .from("clients")
+            .update({ status: "connected" })
+            .eq("id", link.client_id);
 
           return Response.json({ ok: true, webhook_subscribed: webhookSubscribed });
         } catch (err: any) {
+          if (err instanceof BodyTooLargeError) {
+            return Response.json({ ok: false, error: "payload_too_large" }, { status: 413 });
+          }
           console.error("[onboarding.complete] unexpected", err);
           return Response.json({ ok: false, error: "server_error" }, { status: 500 });
         }

@@ -22,12 +22,14 @@ function normalizePhone(raw: string): string {
 export const sendTestMessage = createServerFn({ method: "POST" })
   .middleware([requireDatabaseAuth])
   .inputValidator((input: { client_id: string; to: string; message: string; type?: string }) =>
-    z.object({
-      client_id: z.string().uuid(),
-      to: z.string().trim().min(4).max(30),
-      message: z.string().trim().min(1).max(4096),
-      type: z.string().optional(),
-    }).parse(input),
+    z
+      .object({
+        client_id: z.string().uuid(),
+        to: z.string().trim().min(4).max(30),
+        message: z.string().trim().min(1).max(4096),
+        type: z.string().optional(),
+      })
+      .parse(input),
   )
   .handler(async ({ context, data }) => {
     await assertAdmin(context.database, context.userId);
@@ -63,7 +65,8 @@ export const sendTestMessage = createServerFn({ method: "POST" })
       .maybeSingle();
 
     if (!acct || !acct.phone_number_id || !acct.token_encrypted) {
-      const errMsg = "El cliente no tiene una cuenta de WhatsApp conectada con credenciales válidas.";
+      const errMsg =
+        "El cliente no tiene una cuenta de WhatsApp conectada con credenciales válidas.";
       await databaseAdmin.from("message_send_logs").insert({
         client_id: client.id,
         phone_number_id: acct?.phone_number_id ?? null,
@@ -98,6 +101,7 @@ export const sendTestMessage = createServerFn({ method: "POST" })
           "content-type": "application/json",
         },
         body: JSON.stringify(metaBody),
+        signal: AbortSignal.timeout(Number(process.env.META_TIMEOUT_MS ?? 15_000)),
       });
       httpStatus = res.status;
       metaJson = await res.json().catch(() => ({}));
@@ -107,7 +111,7 @@ export const sendTestMessage = createServerFn({ method: "POST" })
       console.error("[sendTestMessage] network error", networkErr);
     }
 
-    const metaMessageId = ok ? metaJson?.messages?.[0]?.id ?? null : null;
+    const metaMessageId = ok ? (metaJson?.messages?.[0]?.id ?? null) : null;
     const metaError = !ok
       ? {
           message: metaJson?.error?.message ?? networkErr ?? "Fallo al enviar",
@@ -148,15 +152,13 @@ export const sendTestMessage = createServerFn({ method: "POST" })
       meta_message_status: ok ? "accepted" : null,
       success: ok,
       error_code: metaJson?.error?.code != null ? String(metaJson.error.code) : null,
-      error_subcode: metaJson?.error?.error_subcode != null ? String(metaJson.error.error_subcode) : null,
+      error_subcode:
+        metaJson?.error?.error_subcode != null ? String(metaJson.error.error_subcode) : null,
       error_type: metaJson?.error?.type ?? (networkErr ? "network_error" : null),
       error_message: metaError?.message ?? null,
       fbtrace_id: metaJson?.error?.fbtrace_id ?? null,
       source: "panel",
     } as any);
-
-
-
 
     if (!ok) {
       console.error("[sendTestMessage] Meta error", httpStatus, metaError);
@@ -169,11 +171,13 @@ export const sendTestMessage = createServerFn({ method: "POST" })
 export const sendWhatsAppMessage = createServerFn({ method: "POST" })
   .middleware([requireDatabaseAuth])
   .inputValidator((input: { whatsapp_account_id: string; to: string; text: string }) =>
-    z.object({
-      whatsapp_account_id: z.string().uuid(),
-      to: z.string().trim().min(5).max(30),
-      text: z.string().trim().min(1).max(4096),
-    }).parse(input),
+    z
+      .object({
+        whatsapp_account_id: z.string().uuid(),
+        to: z.string().trim().min(5).max(30),
+        text: z.string().trim().min(1).max(4096),
+      })
+      .parse(input),
   )
   .handler(async ({ context, data }) => {
     await assertAdmin(context.database, context.userId);
@@ -183,22 +187,27 @@ export const sendWhatsAppMessage = createServerFn({ method: "POST" })
       .select("phone_number_id, token_encrypted")
       .eq("id", data.whatsapp_account_id)
       .maybeSingle();
-    if (!acct?.phone_number_id || !acct?.token_encrypted) throw new Error("Cuenta sin credenciales");
+    if (!acct?.phone_number_id || !acct?.token_encrypted)
+      throw new Error("Cuenta sin credenciales");
     const version = process.env.META_GRAPH_API_VERSION ?? "v25.0";
     const to = data.to.replace(/[^\d]/g, "");
-    const res = await fetch(`https://graph.facebook.com/${version}/${acct.phone_number_id}/messages`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${acct.token_encrypted}`,
-        "content-type": "application/json",
+    const res = await fetch(
+      `https://graph.facebook.com/${version}/${acct.phone_number_id}/messages`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${acct.token_encrypted}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          messaging_product: "whatsapp",
+          to,
+          type: "text",
+          text: { body: data.text },
+        }),
+        signal: AbortSignal.timeout(Number(process.env.META_TIMEOUT_MS ?? 15_000)),
       },
-      body: JSON.stringify({
-        messaging_product: "whatsapp",
-        to,
-        type: "text",
-        text: { body: data.text },
-      }),
-    });
+    );
     const json: any = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(json?.error?.message ?? "Fallo al enviar mensaje");
     return { ok: true, message_id: json?.messages?.[0]?.id ?? null };
@@ -224,8 +233,16 @@ export const resubscribeWabaWebhook = createServerFn({ method: "POST" })
       .maybeSingle();
     if (acctErr) throw new Error(acctErr.message);
     if (!acct) return { ok: false, error: { message: "Cuenta no encontrada", type: "not_found" } };
-    if (!acct.waba_id) return { ok: false, error: { message: "La cuenta no tiene WABA ID", type: "missing_waba_id" } };
-    if (!acct.token_encrypted) return { ok: false, error: { message: "La cuenta no tiene token guardado", type: "missing_token" } };
+    if (!acct.waba_id)
+      return {
+        ok: false,
+        error: { message: "La cuenta no tiene WABA ID", type: "missing_waba_id" },
+      };
+    if (!acct.token_encrypted)
+      return {
+        ok: false,
+        error: { message: "La cuenta no tiene token guardado", type: "missing_token" },
+      };
 
     const version = process.env.META_GRAPH_API_VERSION ?? "v25.0";
     const url = `https://graph.facebook.com/${version}/${acct.waba_id}/subscribed_apps`;
@@ -238,7 +255,11 @@ export const resubscribeWabaWebhook = createServerFn({ method: "POST" })
     try {
       const res = await fetch(url, {
         method: "POST",
-        headers: { Authorization: `Bearer ${acct.token_encrypted}`, "content-type": "application/json" },
+        headers: {
+          Authorization: `Bearer ${acct.token_encrypted}`,
+          "content-type": "application/json",
+        },
+        signal: AbortSignal.timeout(Number(process.env.META_TIMEOUT_MS ?? 15_000)),
       });
       httpStatus = res.status;
       metaJson = await res.json().catch(() => ({}));
@@ -249,7 +270,7 @@ export const resubscribeWabaWebhook = createServerFn({ method: "POST" })
     }
 
     const errorMessage = !ok
-      ? metaJson?.error?.message ?? networkErr ?? `HTTP ${httpStatus}`
+      ? (metaJson?.error?.message ?? networkErr ?? `HTTP ${httpStatus}`)
       : null;
 
     // Log the request/response for auditing.
