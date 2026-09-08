@@ -12,9 +12,9 @@ export const Route = createFileRoute("/api/public/onboarding/validate")({
             return Response.json({ valid: false, reason: "invalid_token" }, { status: 400 });
           }
 
-          const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { databaseAdmin } = await import("@/integrations/database/client.server");
 
-          const { data: link, error } = await supabaseAdmin
+          const { data: link, error } = await databaseAdmin
             .from("onboarding_links")
             .select("id,client_id,expires_at,used_at,clients(name,company_name)")
             .eq("token", token)

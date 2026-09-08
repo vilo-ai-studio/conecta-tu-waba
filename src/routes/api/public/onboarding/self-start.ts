@@ -30,10 +30,10 @@ export const Route = createFileRoute("/api/public/onboarding/self-start")({
             return Response.json({ ok: false, error: "invalid_email" }, { status: 400 });
           }
 
-          const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { databaseAdmin } = await import("@/integrations/database/client.server");
 
           // 1) Create client
-          const { data: client, error: cErr } = await supabaseAdmin
+          const { data: client, error: cErr } = await databaseAdmin
             .from("clients")
             .insert({
               name,
@@ -49,7 +49,7 @@ export const Route = createFileRoute("/api/public/onboarding/self-start")({
           }
 
           // 2) Create pending whatsapp_accounts row (best-effort — non-fatal)
-          const { error: waErr } = await supabaseAdmin
+          const { error: waErr } = await databaseAdmin
             .from("whatsapp_accounts")
             .insert({ client_id: client.id, status: "pending" });
           if (waErr) console.warn("[onboarding.self-start] wa insert warn", waErr);
@@ -62,7 +62,7 @@ export const Route = createFileRoute("/api/public/onboarding/self-start")({
             return Response.json({ ok: false, error: "token_gen_failed" }, { status: 500 });
           }
           const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-          const { error: lErr } = await supabaseAdmin
+          const { error: lErr } = await databaseAdmin
             .from("onboarding_links")
             .insert({ client_id: client.id, token, expires_at: expiresAt });
           if (lErr) {

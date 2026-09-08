@@ -30,10 +30,10 @@ export const Route = createFileRoute("/api/public/onboarding/complete")({
             );
           }
 
-          const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { databaseAdmin } = await import("@/integrations/database/client.server");
 
           // 1) Validate onboarding link
-          const { data: link, error: linkErr } = await supabaseAdmin
+          const { data: link, error: linkErr } = await databaseAdmin
             .from("onboarding_links")
             .select("id,client_id,expires_at,used_at")
             .eq("token", body.token)
@@ -56,7 +56,7 @@ export const Route = createFileRoute("/api/public/onboarding/complete")({
           }
 
           // Mark client as in_progress
-          await supabaseAdmin.from("clients").update({ status: "in_progress" }).eq("id", link.client_id);
+          await databaseAdmin.from("clients").update({ status: "in_progress" }).eq("id", link.client_id);
 
           // 2) Exchange code -> access_token
           // TODO Meta: confirm exact endpoint/params for Embedded Signup (Tech Provider / Coexistence flow).
@@ -70,7 +70,7 @@ export const Route = createFileRoute("/api/public/onboarding/complete")({
           const tokenJson: any = await tokenRes.json();
           if (!tokenRes.ok || !tokenJson.access_token) {
             console.error("[onboarding.complete] token exchange failed", tokenJson);
-            await supabaseAdmin.from("clients").update({ status: "onboarding_error" }).eq("id", link.client_id);
+            await databaseAdmin.from("clients").update({ status: "onboarding_error" }).eq("id", link.client_id);
             return Response.json({ ok: false, error: "token_exchange_failed", detail: tokenJson }, { status: 502 });
           }
           const accessToken: string = tokenJson.access_token;
@@ -100,7 +100,6 @@ export const Route = createFileRoute("/api/public/onboarding/complete")({
 
           // 5) Store account (upsert on phone_number_id)
           // NOTE: `token_encrypted` currently stores the token as-is. Introduce
-          // application-level encryption (e.g. Supabase Vault or KMS) before production.
           const upsertPayload = {
             client_id: link.client_id,
             waba_id: body.waba_id ?? null,
@@ -117,7 +116,7 @@ export const Route = createFileRoute("/api/public/onboarding/complete")({
           // Prefer updating an existing pending row for this client (created by
           // /api/public/onboarding/self-start) so we don't leave orphaned pendings.
           let waErr: any = null;
-          const { data: pendingRow } = await supabaseAdmin
+          const { data: pendingRow } = await databaseAdmin
             .from("whatsapp_accounts")
             .select("id")
             .eq("client_id", link.client_id)
@@ -125,29 +124,29 @@ export const Route = createFileRoute("/api/public/onboarding/complete")({
             .maybeSingle();
 
           if (pendingRow?.id) {
-            const { error } = await supabaseAdmin
+            const { error } = await databaseAdmin
               .from("whatsapp_accounts")
               .update(upsertPayload)
               .eq("id", pendingRow.id);
             waErr = error;
           } else if (body.phone_number_id) {
-            const { error } = await supabaseAdmin
+            const { error } = await databaseAdmin
               .from("whatsapp_accounts")
               .upsert(upsertPayload, { onConflict: "phone_number_id" });
             waErr = error;
           } else {
-            const { error } = await supabaseAdmin.from("whatsapp_accounts").insert(upsertPayload);
+            const { error } = await databaseAdmin.from("whatsapp_accounts").insert(upsertPayload);
             waErr = error;
           }
           if (waErr) {
             console.error("[onboarding.complete] db upsert failed", waErr);
-            await supabaseAdmin.from("clients").update({ status: "onboarding_error" }).eq("id", link.client_id);
+            await databaseAdmin.from("clients").update({ status: "onboarding_error" }).eq("id", link.client_id);
             return Response.json({ ok: false, error: "db_error" }, { status: 500 });
           }
 
           // 6) Mark link used + client connected
-          await supabaseAdmin.from("onboarding_links").update({ used_at: new Date().toISOString() }).eq("id", link.id);
-          await supabaseAdmin.from("clients").update({ status: "connected" }).eq("id", link.client_id);
+          await databaseAdmin.from("onboarding_links").update({ used_at: new Date().toISOString() }).eq("id", link.id);
+          await databaseAdmin.from("clients").update({ status: "connected" }).eq("id", link.client_id);
 
           return Response.json({ ok: true, webhook_subscribed: webhookSubscribed });
         } catch (err: any) {

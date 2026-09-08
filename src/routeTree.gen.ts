@@ -9,24 +9,32 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as OnboardingRouteImport } from './routes/onboarding'
-import { Route as AuthRouteImport } from './routes/auth'
-import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as ConnectTokenRouteImport } from './routes/connect.$token'
+import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
+import { Route as AuthRouteImport } from './routes/auth'
+import { Route as OnboardingRouteImport } from './routes/onboarding'
 import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
-import { Route as ApiPublicMetaConfigRouteImport } from './routes/api/public/meta-config'
+import { Route as ApiHealthRouteImport } from './routes/api/health'
+import { Route as ConnectTokenRouteImport } from './routes/connect.$token'
 import { Route as AuthenticatedClientsIdRouteImport } from './routes/_authenticated/clients.$id'
-import { Route as ApiPublicWhatsappWebhookRouteImport } from './routes/api/public/whatsapp/webhook'
-import { Route as ApiPublicWhatsappSendMessageRouteImport } from './routes/api/public/whatsapp/send-message'
-import { Route as ApiPublicOnboardingValidateRouteImport } from './routes/api/public/onboarding/validate'
-import { Route as ApiPublicOnboardingSelfStartRouteImport } from './routes/api/public/onboarding/self-start'
-import { Route as ApiPublicOnboardingCompleteRouteImport } from './routes/api/public/onboarding/complete'
+import { Route as ApiAuthLoginRouteImport } from './routes/api/auth/login'
+import { Route as ApiAuthLogoutRouteImport } from './routes/api/auth/logout'
+import { Route as ApiAuthSessionRouteImport } from './routes/api/auth/session'
+import { Route as ApiPublicMetaConfigRouteImport } from './routes/api/public/meta-config'
 import { Route as ApiPublicChatwootWebhookRouteImport } from './routes/api/public/chatwoot/webhook'
+import { Route as ApiPublicOnboardingCompleteRouteImport } from './routes/api/public/onboarding/complete'
+import { Route as ApiPublicOnboardingSelfStartRouteImport } from './routes/api/public/onboarding/self-start'
+import { Route as ApiPublicOnboardingValidateRouteImport } from './routes/api/public/onboarding/validate'
+import { Route as ApiPublicWhatsappSendMessageRouteImport } from './routes/api/public/whatsapp/send-message'
+import { Route as ApiPublicWhatsappWebhookRouteImport } from './routes/api/public/whatsapp/webhook'
 
-const OnboardingRoute = OnboardingRouteImport.update({
-  id: '/onboarding',
-  path: '/onboarding',
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuthenticatedRouteRoute = AuthenticatedRouteRouteImport.update({
+  id: '/_authenticated',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthRoute = AuthRouteImport.update({
@@ -34,18 +42,9 @@ const AuthRoute = AuthRouteImport.update({
   path: '/auth',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AuthenticatedRouteRoute = AuthenticatedRouteRouteImport.update({
-  id: '/_authenticated',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ConnectTokenRoute = ConnectTokenRouteImport.update({
-  id: '/connect/$token',
-  path: '/connect/$token',
+const OnboardingRoute = OnboardingRouteImport.update({
+  id: '/onboarding',
+  path: '/onboarding',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthenticatedDashboardRoute = AuthenticatedDashboardRouteImport.update({
@@ -53,9 +52,14 @@ const AuthenticatedDashboardRoute = AuthenticatedDashboardRouteImport.update({
   path: '/dashboard',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
-const ApiPublicMetaConfigRoute = ApiPublicMetaConfigRouteImport.update({
-  id: '/api/public/meta-config',
-  path: '/api/public/meta-config',
+const ApiHealthRoute = ApiHealthRouteImport.update({
+  id: '/api/health',
+  path: '/api/health',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ConnectTokenRoute = ConnectTokenRouteImport.update({
+  id: '/connect/$token',
+  path: '/connect/$token',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthenticatedClientsIdRoute = AuthenticatedClientsIdRouteImport.update({
@@ -63,28 +67,30 @@ const AuthenticatedClientsIdRoute = AuthenticatedClientsIdRouteImport.update({
   path: '/clients/$id',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
-const ApiPublicWhatsappWebhookRoute =
-  ApiPublicWhatsappWebhookRouteImport.update({
-    id: '/api/public/whatsapp/webhook',
-    path: '/api/public/whatsapp/webhook',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const ApiPublicWhatsappSendMessageRoute =
-  ApiPublicWhatsappSendMessageRouteImport.update({
-    id: '/api/public/whatsapp/send-message',
-    path: '/api/public/whatsapp/send-message',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const ApiPublicOnboardingValidateRoute =
-  ApiPublicOnboardingValidateRouteImport.update({
-    id: '/api/public/onboarding/validate',
-    path: '/api/public/onboarding/validate',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const ApiPublicOnboardingSelfStartRoute =
-  ApiPublicOnboardingSelfStartRouteImport.update({
-    id: '/api/public/onboarding/self-start',
-    path: '/api/public/onboarding/self-start',
+const ApiAuthLoginRoute = ApiAuthLoginRouteImport.update({
+  id: '/api/auth/login',
+  path: '/api/auth/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAuthLogoutRoute = ApiAuthLogoutRouteImport.update({
+  id: '/api/auth/logout',
+  path: '/api/auth/logout',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAuthSessionRoute = ApiAuthSessionRouteImport.update({
+  id: '/api/auth/session',
+  path: '/api/auth/session',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiPublicMetaConfigRoute = ApiPublicMetaConfigRouteImport.update({
+  id: '/api/public/meta-config',
+  path: '/api/public/meta-config',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiPublicChatwootWebhookRoute =
+  ApiPublicChatwootWebhookRouteImport.update({
+    id: '/api/public/chatwoot/webhook',
+    path: '/api/public/chatwoot/webhook',
     getParentRoute: () => rootRouteImport,
   } as any)
 const ApiPublicOnboardingCompleteRoute =
@@ -93,10 +99,28 @@ const ApiPublicOnboardingCompleteRoute =
     path: '/api/public/onboarding/complete',
     getParentRoute: () => rootRouteImport,
   } as any)
-const ApiPublicChatwootWebhookRoute =
-  ApiPublicChatwootWebhookRouteImport.update({
-    id: '/api/public/chatwoot/webhook',
-    path: '/api/public/chatwoot/webhook',
+const ApiPublicOnboardingSelfStartRoute =
+  ApiPublicOnboardingSelfStartRouteImport.update({
+    id: '/api/public/onboarding/self-start',
+    path: '/api/public/onboarding/self-start',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiPublicOnboardingValidateRoute =
+  ApiPublicOnboardingValidateRouteImport.update({
+    id: '/api/public/onboarding/validate',
+    path: '/api/public/onboarding/validate',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiPublicWhatsappSendMessageRoute =
+  ApiPublicWhatsappSendMessageRouteImport.update({
+    id: '/api/public/whatsapp/send-message',
+    path: '/api/public/whatsapp/send-message',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiPublicWhatsappWebhookRoute =
+  ApiPublicWhatsappWebhookRouteImport.update({
+    id: '/api/public/whatsapp/webhook',
+    path: '/api/public/whatsapp/webhook',
     getParentRoute: () => rootRouteImport,
   } as any)
 
@@ -105,8 +129,12 @@ export interface FileRoutesByFullPath {
   '/auth': typeof AuthRoute
   '/onboarding': typeof OnboardingRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
+  '/api/health': typeof ApiHealthRoute
   '/connect/$token': typeof ConnectTokenRoute
   '/clients/$id': typeof AuthenticatedClientsIdRoute
+  '/api/auth/login': typeof ApiAuthLoginRoute
+  '/api/auth/logout': typeof ApiAuthLogoutRoute
+  '/api/auth/session': typeof ApiAuthSessionRoute
   '/api/public/meta-config': typeof ApiPublicMetaConfigRoute
   '/api/public/chatwoot/webhook': typeof ApiPublicChatwootWebhookRoute
   '/api/public/onboarding/complete': typeof ApiPublicOnboardingCompleteRoute
@@ -120,8 +148,12 @@ export interface FileRoutesByTo {
   '/auth': typeof AuthRoute
   '/onboarding': typeof OnboardingRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
+  '/api/health': typeof ApiHealthRoute
   '/connect/$token': typeof ConnectTokenRoute
   '/clients/$id': typeof AuthenticatedClientsIdRoute
+  '/api/auth/login': typeof ApiAuthLoginRoute
+  '/api/auth/logout': typeof ApiAuthLogoutRoute
+  '/api/auth/session': typeof ApiAuthSessionRoute
   '/api/public/meta-config': typeof ApiPublicMetaConfigRoute
   '/api/public/chatwoot/webhook': typeof ApiPublicChatwootWebhookRoute
   '/api/public/onboarding/complete': typeof ApiPublicOnboardingCompleteRoute
@@ -137,8 +169,12 @@ export interface FileRoutesById {
   '/auth': typeof AuthRoute
   '/onboarding': typeof OnboardingRoute
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
+  '/api/health': typeof ApiHealthRoute
   '/connect/$token': typeof ConnectTokenRoute
   '/_authenticated/clients/$id': typeof AuthenticatedClientsIdRoute
+  '/api/auth/login': typeof ApiAuthLoginRoute
+  '/api/auth/logout': typeof ApiAuthLogoutRoute
+  '/api/auth/session': typeof ApiAuthSessionRoute
   '/api/public/meta-config': typeof ApiPublicMetaConfigRoute
   '/api/public/chatwoot/webhook': typeof ApiPublicChatwootWebhookRoute
   '/api/public/onboarding/complete': typeof ApiPublicOnboardingCompleteRoute
@@ -154,8 +190,12 @@ export interface FileRouteTypes {
     | '/auth'
     | '/onboarding'
     | '/dashboard'
+    | '/api/health'
     | '/connect/$token'
     | '/clients/$id'
+    | '/api/auth/login'
+    | '/api/auth/logout'
+    | '/api/auth/session'
     | '/api/public/meta-config'
     | '/api/public/chatwoot/webhook'
     | '/api/public/onboarding/complete'
@@ -169,8 +209,12 @@ export interface FileRouteTypes {
     | '/auth'
     | '/onboarding'
     | '/dashboard'
+    | '/api/health'
     | '/connect/$token'
     | '/clients/$id'
+    | '/api/auth/login'
+    | '/api/auth/logout'
+    | '/api/auth/session'
     | '/api/public/meta-config'
     | '/api/public/chatwoot/webhook'
     | '/api/public/onboarding/complete'
@@ -185,8 +229,12 @@ export interface FileRouteTypes {
     | '/auth'
     | '/onboarding'
     | '/_authenticated/dashboard'
+    | '/api/health'
     | '/connect/$token'
     | '/_authenticated/clients/$id'
+    | '/api/auth/login'
+    | '/api/auth/logout'
+    | '/api/auth/session'
     | '/api/public/meta-config'
     | '/api/public/chatwoot/webhook'
     | '/api/public/onboarding/complete'
@@ -201,7 +249,11 @@ export interface RootRouteChildren {
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
   OnboardingRoute: typeof OnboardingRoute
+  ApiHealthRoute: typeof ApiHealthRoute
   ConnectTokenRoute: typeof ConnectTokenRoute
+  ApiAuthLoginRoute: typeof ApiAuthLoginRoute
+  ApiAuthLogoutRoute: typeof ApiAuthLogoutRoute
+  ApiAuthSessionRoute: typeof ApiAuthSessionRoute
   ApiPublicMetaConfigRoute: typeof ApiPublicMetaConfigRoute
   ApiPublicChatwootWebhookRoute: typeof ApiPublicChatwootWebhookRoute
   ApiPublicOnboardingCompleteRoute: typeof ApiPublicOnboardingCompleteRoute
@@ -213,18 +265,11 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/onboarding': {
-      id: '/onboarding'
-      path: '/onboarding'
-      fullPath: '/onboarding'
-      preLoaderRoute: typeof OnboardingRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/auth': {
-      id: '/auth'
-      path: '/auth'
-      fullPath: '/auth'
-      preLoaderRoute: typeof AuthRouteImport
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_authenticated': {
@@ -234,18 +279,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
+    '/auth': {
+      id: '/auth'
+      path: '/auth'
+      fullPath: '/auth'
+      preLoaderRoute: typeof AuthRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/connect/$token': {
-      id: '/connect/$token'
-      path: '/connect/$token'
-      fullPath: '/connect/$token'
-      preLoaderRoute: typeof ConnectTokenRouteImport
+    '/onboarding': {
+      id: '/onboarding'
+      path: '/onboarding'
+      fullPath: '/onboarding'
+      preLoaderRoute: typeof OnboardingRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_authenticated/dashboard': {
@@ -255,11 +300,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedDashboardRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
-    '/api/public/meta-config': {
-      id: '/api/public/meta-config'
-      path: '/api/public/meta-config'
-      fullPath: '/api/public/meta-config'
-      preLoaderRoute: typeof ApiPublicMetaConfigRouteImport
+    '/api/health': {
+      id: '/api/health'
+      path: '/api/health'
+      fullPath: '/api/health'
+      preLoaderRoute: typeof ApiHealthRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/connect/$token': {
+      id: '/connect/$token'
+      path: '/connect/$token'
+      fullPath: '/connect/$token'
+      preLoaderRoute: typeof ConnectTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_authenticated/clients/$id': {
@@ -269,32 +321,39 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedClientsIdRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
-    '/api/public/whatsapp/webhook': {
-      id: '/api/public/whatsapp/webhook'
-      path: '/api/public/whatsapp/webhook'
-      fullPath: '/api/public/whatsapp/webhook'
-      preLoaderRoute: typeof ApiPublicWhatsappWebhookRouteImport
+    '/api/auth/login': {
+      id: '/api/auth/login'
+      path: '/api/auth/login'
+      fullPath: '/api/auth/login'
+      preLoaderRoute: typeof ApiAuthLoginRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/public/whatsapp/send-message': {
-      id: '/api/public/whatsapp/send-message'
-      path: '/api/public/whatsapp/send-message'
-      fullPath: '/api/public/whatsapp/send-message'
-      preLoaderRoute: typeof ApiPublicWhatsappSendMessageRouteImport
+    '/api/auth/logout': {
+      id: '/api/auth/logout'
+      path: '/api/auth/logout'
+      fullPath: '/api/auth/logout'
+      preLoaderRoute: typeof ApiAuthLogoutRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/public/onboarding/validate': {
-      id: '/api/public/onboarding/validate'
-      path: '/api/public/onboarding/validate'
-      fullPath: '/api/public/onboarding/validate'
-      preLoaderRoute: typeof ApiPublicOnboardingValidateRouteImport
+    '/api/auth/session': {
+      id: '/api/auth/session'
+      path: '/api/auth/session'
+      fullPath: '/api/auth/session'
+      preLoaderRoute: typeof ApiAuthSessionRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/public/onboarding/self-start': {
-      id: '/api/public/onboarding/self-start'
-      path: '/api/public/onboarding/self-start'
-      fullPath: '/api/public/onboarding/self-start'
-      preLoaderRoute: typeof ApiPublicOnboardingSelfStartRouteImport
+    '/api/public/meta-config': {
+      id: '/api/public/meta-config'
+      path: '/api/public/meta-config'
+      fullPath: '/api/public/meta-config'
+      preLoaderRoute: typeof ApiPublicMetaConfigRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/public/chatwoot/webhook': {
+      id: '/api/public/chatwoot/webhook'
+      path: '/api/public/chatwoot/webhook'
+      fullPath: '/api/public/chatwoot/webhook'
+      preLoaderRoute: typeof ApiPublicChatwootWebhookRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/public/onboarding/complete': {
@@ -304,11 +363,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicOnboardingCompleteRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/public/chatwoot/webhook': {
-      id: '/api/public/chatwoot/webhook'
-      path: '/api/public/chatwoot/webhook'
-      fullPath: '/api/public/chatwoot/webhook'
-      preLoaderRoute: typeof ApiPublicChatwootWebhookRouteImport
+    '/api/public/onboarding/self-start': {
+      id: '/api/public/onboarding/self-start'
+      path: '/api/public/onboarding/self-start'
+      fullPath: '/api/public/onboarding/self-start'
+      preLoaderRoute: typeof ApiPublicOnboardingSelfStartRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/public/onboarding/validate': {
+      id: '/api/public/onboarding/validate'
+      path: '/api/public/onboarding/validate'
+      fullPath: '/api/public/onboarding/validate'
+      preLoaderRoute: typeof ApiPublicOnboardingValidateRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/public/whatsapp/send-message': {
+      id: '/api/public/whatsapp/send-message'
+      path: '/api/public/whatsapp/send-message'
+      fullPath: '/api/public/whatsapp/send-message'
+      preLoaderRoute: typeof ApiPublicWhatsappSendMessageRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/public/whatsapp/webhook': {
+      id: '/api/public/whatsapp/webhook'
+      path: '/api/public/whatsapp/webhook'
+      fullPath: '/api/public/whatsapp/webhook'
+      preLoaderRoute: typeof ApiPublicWhatsappWebhookRouteImport
       parentRoute: typeof rootRouteImport
     }
   }
@@ -332,7 +412,11 @@ const rootRouteChildren: RootRouteChildren = {
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
   OnboardingRoute: OnboardingRoute,
+  ApiHealthRoute: ApiHealthRoute,
   ConnectTokenRoute: ConnectTokenRoute,
+  ApiAuthLoginRoute: ApiAuthLoginRoute,
+  ApiAuthLogoutRoute: ApiAuthLogoutRoute,
+  ApiAuthSessionRoute: ApiAuthSessionRoute,
   ApiPublicMetaConfigRoute: ApiPublicMetaConfigRoute,
   ApiPublicChatwootWebhookRoute: ApiPublicChatwootWebhookRoute,
   ApiPublicOnboardingCompleteRoute: ApiPublicOnboardingCompleteRoute,
@@ -344,3 +428,13 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}

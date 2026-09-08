@@ -1,9 +1,9 @@
 import { createServerFn } from "@tanstack/react-start";
-import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { requireDatabaseAuth } from "@/integrations/database/auth-middleware";
 import { z } from "zod";
 
-async function assertAdmin(supabase: any, userId: string) {
-  const { data } = await supabase
+async function assertAdmin(database: any, userId: string) {
+  const { data } = await database
     .from("user_roles")
     .select("role")
     .eq("user_id", userId)
@@ -15,7 +15,7 @@ async function assertAdmin(supabase: any, userId: string) {
 // Lista los logs de envío de mensajes de WhatsApp para un cliente, más
 // reciente primero. Incluye source (panel/n8n), status, error y payload crudo.
 export const listMessageLogs = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireDatabaseAuth])
   .inputValidator((input: { client_id: string; limit?: number; status?: string | null }) =>
     z.object({
       client_id: z.string().uuid(),
@@ -24,9 +24,9 @@ export const listMessageLogs = createServerFn({ method: "GET" })
     }).parse(input),
   )
   .handler(async ({ context, data }) => {
-    await assertAdmin(context.supabase, context.userId);
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    let q = supabaseAdmin
+    await assertAdmin(context.database, context.userId);
+    const { databaseAdmin } = await import("@/integrations/database/client.server");
+    let q = databaseAdmin
       .from("message_send_logs")
       .select("*")
       .eq("client_id", data.client_id)

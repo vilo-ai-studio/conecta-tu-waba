@@ -1,8 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { listMessageLogs } from "@/lib/message-logs.functions";
-import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -44,41 +43,17 @@ const STATUS_FILTERS: { key: string; label: string }[] = [
 
 export function MessageLogsCard({ clientId }: { clientId: string }) {
   const load = useServerFn(listMessageLogs);
-  const queryClient = useQueryClient();
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [live, setLive] = useState(true);
-  const [pulse, setPulse] = useState(false);
+  const pulse = false;
 
   const query = useQuery({
     queryKey: ["message-logs", clientId, statusFilter],
     queryFn: () => load({ data: { client_id: clientId, limit: 200, status: statusFilter } }),
     refetchOnWindowFocus: false,
+    refetchInterval: live ? 3_000 : false,
   });
-
-  useEffect(() => {
-    if (!live) return;
-    const channel = supabase
-      .channel(`msg-logs-${clientId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "message_send_logs",
-          filter: `client_id=eq.${clientId}`,
-        },
-        () => {
-          setPulse(true);
-          setTimeout(() => setPulse(false), 800);
-          queryClient.invalidateQueries({ queryKey: ["message-logs", clientId] });
-        },
-      )
-      .subscribe();
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [clientId, live, queryClient]);
 
   const rows = (query.data as LogRow[] | undefined) ?? [];
 
@@ -154,9 +129,7 @@ export function MessageLogsCard({ clientId }: { clientId: string }) {
             <Button
               variant="outline"
               size="sm"
-              onClick={() =>
-                queryClient.invalidateQueries({ queryKey: ["message-logs", clientId] })
-              }
+              onClick={() => query.refetch()}
               disabled={query.isFetching}
             >
               <RefreshCw className={`mr-1 h-3 w-3 ${query.isFetching ? "animate-spin" : ""}`} />

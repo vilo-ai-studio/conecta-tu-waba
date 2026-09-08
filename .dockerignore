@@ -1,0 +1,9 @@
+.git
+.env
+.env.*
+!.env.vps.example
+node_modules
+.output
+dist
+logs
+*.log

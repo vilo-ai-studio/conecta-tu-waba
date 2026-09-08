@@ -40,7 +40,7 @@ export const Route = createFileRoute("/api/public/whatsapp/webhook")({
         const queryParams: Record<string, string> = {};
         reqUrl.searchParams.forEach((v, k) => { queryParams[k] = v; });
 
-        const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { databaseAdmin } = await import("@/integrations/database/client.server");
 
         // 0) Guardar SIEMPRE el payload crudo, antes de cualquier validación.
         let parsedBody: any = null;
@@ -75,7 +75,7 @@ export const Route = createFileRoute("/api/public/whatsapp/webhook")({
             (parsedBody?.entry && !detectedPhoneId)
           );
 
-        const rawInsert = await supabaseAdmin
+        const rawInsert = await databaseAdmin
           .from("raw_meta_webhook_events")
           .insert({
             method: "POST",
@@ -132,7 +132,7 @@ export const Route = createFileRoute("/api/public/whatsapp/webhook")({
           >();
 
           if (phoneNumberIds.size > 0) {
-            const { data: accounts } = await supabaseAdmin
+            const { data: accounts } = await databaseAdmin
               .from("whatsapp_accounts")
               .select(
                 "id, phone_number_id, client_id, clients:client_id(n8n_enabled, n8n_webhook_url, n8n_webhook_secret_encrypted)",
@@ -211,7 +211,7 @@ export const Route = createFileRoute("/api/public/whatsapp/webhook")({
                 : null;
 
               // Insertar meta_webhook_events y recuperar id.
-              const { data: insertedEvent } = await supabaseAdmin
+              const { data: insertedEvent } = await databaseAdmin
                 .from("meta_webhook_events")
                 .insert({
                   client_id: account?.client_id ?? null,
@@ -242,7 +242,7 @@ export const Route = createFileRoute("/api/public/whatsapp/webhook")({
                 .single();
 
               // Mantener compatibilidad con webhook_events viejo.
-              await supabaseAdmin.from("webhook_events").insert({
+              await databaseAdmin.from("webhook_events").insert({
                 whatsapp_account_id: account?.account_id ?? null,
                 event_type: field,
                 payload: {
@@ -253,7 +253,7 @@ export const Route = createFileRoute("/api/public/whatsapp/webhook")({
 
               // Si es un status para un envío nuestro, actualizar whatsapp_send_logs.
               if (event_kind === "status" && wa_message_id && status) {
-                await supabaseAdmin
+                await databaseAdmin
                   .from("whatsapp_send_logs")
                   .update({
                     meta_message_status: status,
@@ -281,7 +281,7 @@ export const Route = createFileRoute("/api/public/whatsapp/webhook")({
 
               // A) No whatsapp_account
               if (!account) {
-                await supabaseAdmin.from("n8n_forward_logs").insert({
+                await databaseAdmin.from("n8n_forward_logs").insert({
                   ...baseLog,
                   error_message: "No whatsapp_account found for phone_number_id",
                 });
@@ -290,7 +290,7 @@ export const Route = createFileRoute("/api/public/whatsapp/webhook")({
 
               // B) whatsapp_account sin client_id (defensivo)
               if (!account.client_id) {
-                await supabaseAdmin.from("n8n_forward_logs").insert({
+                await databaseAdmin.from("n8n_forward_logs").insert({
                   ...baseLog,
                   error_message: "No client found for whatsapp_account",
                 });
@@ -299,7 +299,7 @@ export const Route = createFileRoute("/api/public/whatsapp/webhook")({
 
               // C) n8n_enabled !== true
               if (!account.n8n_enabled) {
-                await supabaseAdmin.from("n8n_forward_logs").insert({
+                await databaseAdmin.from("n8n_forward_logs").insert({
                   ...baseLog,
                   n8n_enabled_value: account.n8n_enabled ?? false,
                   error_message: "n8n disabled for client",
@@ -309,7 +309,7 @@ export const Route = createFileRoute("/api/public/whatsapp/webhook")({
 
               // D) Sin URL
               if (!account.n8n_webhook_url || account.n8n_webhook_url.length === 0) {
-                await supabaseAdmin.from("n8n_forward_logs").insert({
+                await databaseAdmin.from("n8n_forward_logs").insert({
                   ...baseLog,
                   n8n_enabled_value: true,
                   error_message: "n8n webhook URL missing",
@@ -319,7 +319,7 @@ export const Route = createFileRoute("/api/public/whatsapp/webhook")({
 
               // E) Sin secreto
               if (!account.n8n_webhook_secret_encrypted) {
-                await supabaseAdmin.from("n8n_forward_logs").insert({
+                await databaseAdmin.from("n8n_forward_logs").insert({
                   ...baseLog,
                   n8n_enabled_value: true,
                   error_message: "n8n webhook secret missing",
@@ -330,7 +330,7 @@ export const Route = createFileRoute("/api/public/whatsapp/webhook")({
               // E.5) Bloquear reenvío de status events a n8n. Solo message
               // events se reenvían al bot.
               if (event_kind !== "message") {
-                await supabaseAdmin.from("n8n_forward_logs").insert({
+                await databaseAdmin.from("n8n_forward_logs").insert({
                   ...baseLog,
                   n8n_enabled_value: true,
                   error_message: `status_event_ignored:${event_kind ?? "unknown"}${status ? `:${status}` : ""}`,
@@ -341,7 +341,7 @@ export const Route = createFileRoute("/api/public/whatsapp/webhook")({
               // E.6) Anti-duplicados para mensajes entrantes: usar
               // processed_whatsapp_messages como fuente de verdad.
               if (wa_message_id) {
-                const existing = await supabaseAdmin
+                const existing = await databaseAdmin
                   .from("processed_whatsapp_messages")
                   .select("id, duplicate_count")
                   .eq("message_id", wa_message_id)
@@ -349,7 +349,7 @@ export const Route = createFileRoute("/api/public/whatsapp/webhook")({
 
                 if (existing.data?.id) {
                   const nextCount = (existing.data.duplicate_count ?? 0) + 1;
-                  await supabaseAdmin
+                  await databaseAdmin
                     .from("processed_whatsapp_messages")
                     .update({
                       duplicate_count: nextCount,
@@ -357,7 +357,7 @@ export const Route = createFileRoute("/api/public/whatsapp/webhook")({
                     })
                     .eq("id", existing.data.id);
                   console.log("[wa-webhook] duplicate_ignored", { message_id: wa_message_id, count: nextCount });
-                  await supabaseAdmin.from("n8n_forward_logs").insert({
+                  await databaseAdmin.from("n8n_forward_logs").insert({
                     ...baseLog,
                     n8n_enabled_value: true,
                     error_message: `duplicate_ignored:count=${nextCount}`,
@@ -367,7 +367,7 @@ export const Route = createFileRoute("/api/public/whatsapp/webhook")({
 
                 // Insertar ANTES de reenviar para que un retry paralelo no dispare 2 veces.
                 const nowIso = new Date().toISOString();
-                const insertRes = await supabaseAdmin
+                const insertRes = await databaseAdmin
                   .from("processed_whatsapp_messages")
                   .insert({
                     client_id: account.client_id,
@@ -385,11 +385,11 @@ export const Route = createFileRoute("/api/public/whatsapp/webhook")({
                   .select("id")
                   .maybeSingle();
                 if (insertRes.error && (insertRes.error as any).code === "23505") {
-                  await supabaseAdmin
+                  await databaseAdmin
                     .from("processed_whatsapp_messages")
                     .update({ last_seen_at: nowIso })
                     .eq("message_id", wa_message_id);
-                  await supabaseAdmin.from("n8n_forward_logs").insert({
+                  await databaseAdmin.from("n8n_forward_logs").insert({
                     ...baseLog,
                     n8n_enabled_value: true,
                     error_message: "duplicate_ignored:race",
@@ -429,7 +429,7 @@ export const Route = createFileRoute("/api/public/whatsapp/webhook")({
               }
 
               if (chatwootPaused) {
-                await supabaseAdmin.from("n8n_forward_logs").insert({
+                await databaseAdmin.from("n8n_forward_logs").insert({
                   ...baseLog,
                   n8n_enabled_value: true,
                   error_message: `chatwoot_paused:label_or_assignee (${chatwootNote ?? "n/a"})`,
@@ -517,7 +517,7 @@ export const Route = createFileRoute("/api/public/whatsapp/webhook")({
                 console.error("[wa-webhook] n8n forward failed", fwdErrorMessage);
               }
 
-              await supabaseAdmin.from("n8n_forward_logs").insert({
+              await databaseAdmin.from("n8n_forward_logs").insert({
                 client_id: account.client_id,
                 whatsapp_account_id: account.account_id,
                 meta_webhook_event_id: insertedEvent?.id ?? null,
@@ -534,7 +534,7 @@ export const Route = createFileRoute("/api/public/whatsapp/webhook")({
                 attempted_at: attemptedAt,
               });
 
-              await supabaseAdmin
+              await databaseAdmin
                 .from("clients")
                 .update({
                   n8n_last_delivery_at: attemptedAt,
@@ -545,7 +545,7 @@ export const Route = createFileRoute("/api/public/whatsapp/webhook")({
             }
           }
           if (rawInsert.data?.id) {
-            await supabaseAdmin
+            await databaseAdmin
               .from("raw_meta_webhook_events")
               .update({ processed: true })
               .eq("id", rawInsert.data.id);
@@ -553,7 +553,7 @@ export const Route = createFileRoute("/api/public/whatsapp/webhook")({
         } catch (err: any) {
           console.error("[wa-webhook] error", err);
           if (rawInsert.data?.id) {
-            await supabaseAdmin
+            await databaseAdmin
               .from("raw_meta_webhook_events")
               .update({ processing_error: String(err?.message ?? err).slice(0, 500) })
               .eq("id", rawInsert.data.id);

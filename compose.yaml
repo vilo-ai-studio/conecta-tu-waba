@@ -1,0 +1,99 @@
+services:
+  postgres:
+    image: postgres:17-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-conecta_waba}
+      POSTGRES_USER: ${POSTGRES_USER:-conecta_waba}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Define POSTGRES_PASSWORD en .env.vps}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-conecta_waba} -d ${POSTGRES_DB:-conecta_waba}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [backend]
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 3000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-conecta_waba}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-conecta_waba}
+      DATABASE_SSL: disable
+      DATABASE_POOL_SIZE: ${DATABASE_POOL_SIZE:-20}
+      DATA_ENCRYPTION_KEY: ${DATA_ENCRYPTION_KEY:?Define DATA_ENCRYPTION_KEY en .env.vps}
+      APP_URL: https://${DOMAIN}
+      SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-43200}
+      META_APP_ID: ${META_APP_ID}
+      META_APP_SECRET: ${META_APP_SECRET}
+      META_CONFIGURATION_ID: ${META_CONFIGURATION_ID}
+      META_GRAPH_API_VERSION: ${META_GRAPH_API_VERSION:-v25.0}
+      WHATSAPP_VERIFY_TOKEN: ${WHATSAPP_VERIFY_TOKEN}
+    ports:
+      - "127.0.0.1:${APP_PORT:-3000}:3000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks: [backend]
+
+  admin:
+    build: .
+    profiles: [tools]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-conecta_waba}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-conecta_waba}
+      DATABASE_SSL: disable
+      DATA_ENCRYPTION_KEY: ${DATA_ENCRYPTION_KEY:?Define DATA_ENCRYPTION_KEY en .env.vps}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:?Define ADMIN_EMAIL en .env.vps}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Define ADMIN_PASSWORD en .env.vps}
+      ADMIN_NAME: ${ADMIN_NAME:-Administrador}
+    command: ["npm", "run", "admin:create"]
+    networks: [backend]
+
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      DOMAIN: ${DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [backend]
+
+networks:
+  backend:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  caddy_data:
+  caddy_config:

@@ -1,9 +1,9 @@
 import { createServerFn } from "@tanstack/react-start";
-import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { requireDatabaseAuth } from "@/integrations/database/auth-middleware";
 import { z } from "zod";
 
-async function assertAdmin(supabase: any, userId: string) {
-  const { data } = await supabase
+async function assertAdmin(database: any, userId: string) {
+  const { data } = await database
     .from("user_roles")
     .select("role")
     .eq("user_id", userId)
@@ -20,7 +20,7 @@ function normalizePhone(raw: string): string {
 // conectada. El access token nunca sale del backend. Registra el intento en
 // message_send_logs.
 export const sendTestMessage = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireDatabaseAuth])
   .inputValidator((input: { client_id: string; to: string; message: string; type?: string }) =>
     z.object({
       client_id: z.string().uuid(),
@@ -30,7 +30,7 @@ export const sendTestMessage = createServerFn({ method: "POST" })
     }).parse(input),
   )
   .handler(async ({ context, data }) => {
-    await assertAdmin(context.supabase, context.userId);
+    await assertAdmin(context.database, context.userId);
 
     const type = (data.type ?? "text").toLowerCase();
     if (type !== "text") {
@@ -42,9 +42,9 @@ export const sendTestMessage = createServerFn({ method: "POST" })
       return { ok: false, error: { message: "Número de destino inválido", type: "invalid_to" } };
     }
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { databaseAdmin } = await import("@/integrations/database/client.server");
 
-    const { data: client } = await supabaseAdmin
+    const { data: client } = await databaseAdmin
       .from("clients")
       .select("id")
       .eq("id", data.client_id)
@@ -53,7 +53,7 @@ export const sendTestMessage = createServerFn({ method: "POST" })
       return { ok: false, error: { message: "Cliente no encontrado", type: "client_not_found" } };
     }
 
-    const { data: acct } = await supabaseAdmin
+    const { data: acct } = await databaseAdmin
       .from("whatsapp_accounts")
       .select("id, phone_number_id, token_encrypted, status")
       .eq("client_id", client.id)
@@ -64,7 +64,7 @@ export const sendTestMessage = createServerFn({ method: "POST" })
 
     if (!acct || !acct.phone_number_id || !acct.token_encrypted) {
       const errMsg = "El cliente no tiene una cuenta de WhatsApp conectada con credenciales válidas.";
-      await supabaseAdmin.from("message_send_logs").insert({
+      await databaseAdmin.from("message_send_logs").insert({
         client_id: client.id,
         phone_number_id: acct?.phone_number_id ?? null,
         to,
@@ -119,7 +119,7 @@ export const sendTestMessage = createServerFn({ method: "POST" })
         }
       : null;
 
-    await supabaseAdmin.from("message_send_logs").insert({
+    await databaseAdmin.from("message_send_logs").insert({
       client_id: client.id,
       phone_number_id: acct.phone_number_id,
       to,
@@ -134,7 +134,7 @@ export const sendTestMessage = createServerFn({ method: "POST" })
     } as any);
 
     // Nuevo log dedicado a envíos → Meta.
-    await supabaseAdmin.from("whatsapp_send_logs").insert({
+    await databaseAdmin.from("whatsapp_send_logs").insert({
       client_id: client.id,
       whatsapp_account_id: acct.id,
       phone_number_id: acct.phone_number_id,
@@ -167,7 +167,7 @@ export const sendTestMessage = createServerFn({ method: "POST" })
 
 // Legacy helper kept for compatibility with any existing callers.
 export const sendWhatsAppMessage = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireDatabaseAuth])
   .inputValidator((input: { whatsapp_account_id: string; to: string; text: string }) =>
     z.object({
       whatsapp_account_id: z.string().uuid(),
@@ -176,9 +176,9 @@ export const sendWhatsAppMessage = createServerFn({ method: "POST" })
     }).parse(input),
   )
   .handler(async ({ context, data }) => {
-    await assertAdmin(context.supabase, context.userId);
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data: acct } = await supabaseAdmin
+    await assertAdmin(context.database, context.userId);
+    const { databaseAdmin } = await import("@/integrations/database/client.server");
+    const { data: acct } = await databaseAdmin
       .from("whatsapp_accounts")
       .select("phone_number_id, token_encrypted")
       .eq("id", data.whatsapp_account_id)
@@ -209,15 +209,15 @@ export const sendWhatsAppMessage = createServerFn({ method: "POST" })
 // POST /{waba_id}/subscribed_apps con el access token guardado del cliente y
 // actualiza whatsapp_accounts.webhook_subscribed según la respuesta.
 export const resubscribeWabaWebhook = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireDatabaseAuth])
   .inputValidator((input: { whatsapp_account_id: string }) =>
     z.object({ whatsapp_account_id: z.string().uuid() }).parse(input),
   )
   .handler(async ({ context, data }) => {
-    await assertAdmin(context.supabase, context.userId);
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    await assertAdmin(context.database, context.userId);
+    const { databaseAdmin } = await import("@/integrations/database/client.server");
 
-    const { data: acct, error: acctErr } = await supabaseAdmin
+    const { data: acct, error: acctErr } = await databaseAdmin
       .from("whatsapp_accounts")
       .select("id, client_id, waba_id, phone_number_id, token_encrypted")
       .eq("id", data.whatsapp_account_id)
@@ -253,7 +253,7 @@ export const resubscribeWabaWebhook = createServerFn({ method: "POST" })
       : null;
 
     // Log the request/response for auditing.
-    await supabaseAdmin.from("meta_webhook_events").insert({
+    await databaseAdmin.from("meta_webhook_events").insert({
       client_id: acct.client_id,
       whatsapp_account_id: acct.id,
       phone_number_id: acct.phone_number_id,
@@ -271,7 +271,7 @@ export const resubscribeWabaWebhook = createServerFn({ method: "POST" })
       error_details: metaJson?.error ?? null,
     } as any);
 
-    await supabaseAdmin
+    await databaseAdmin
       .from("whatsapp_accounts")
       .update({ webhook_subscribed: ok })
       .eq("id", acct.id);

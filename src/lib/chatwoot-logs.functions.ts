@@ -1,5 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
-import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { requireDatabaseAuth } from "@/integrations/database/auth-middleware";
 import { z } from "zod";
 
 const SENSITIVE_KEYS = new Set([
@@ -75,7 +75,7 @@ const EVENT_GROUPS: Record<string, string[]> = {
 };
 
 export const listChatwootLogs = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireDatabaseAuth])
   .inputValidator((input: { client_id: string; group?: string; limit?: number }) =>
     z
       .object({
@@ -87,7 +87,7 @@ export const listChatwootLogs = createServerFn({ method: "GET" })
   )
   .handler(async ({ context, data }) => {
     // Admin-only, matching other diagnostic surfaces.
-    const { data: role } = await context.supabase
+    const { data: role } = await context.database
       .from("user_roles")
       .select("role")
       .eq("user_id", context.userId)
@@ -95,8 +95,8 @@ export const listChatwootLogs = createServerFn({ method: "GET" })
       .maybeSingle();
     if (!role) throw new Error("No autorizado");
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    let q = supabaseAdmin
+    const { databaseAdmin } = await import("@/integrations/database/client.server");
+    let q = databaseAdmin
       .from("chatwoot_integration_logs")
       .select(
         "id, created_at, event_type, direction, status, wa_id, chatwoot_contact_id, chatwoot_conversation_id, chatwoot_message_id, http_status, error_message, request_payload, response_payload",
@@ -114,7 +114,7 @@ export const listChatwootLogs = createServerFn({ method: "GET" })
     const { data: rows, error } = await q;
     if (error) throw new Error(error.message);
 
-    return (rows ?? []).map((r) => ({
+    return (rows ?? []).map((r: Record<string, any>) => ({
       ...r,
       request_payload: sanitize(r.request_payload),
       response_payload: sanitize(r.response_payload),

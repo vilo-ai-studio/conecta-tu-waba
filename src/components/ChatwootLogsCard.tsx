@@ -1,8 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { listChatwootLogs } from "@/lib/chatwoot-logs.functions";
-import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -109,41 +108,17 @@ function eventBadge(evt: string, status: string | null) {
 
 export function ChatwootLogsCard({ clientId }: { clientId: string }) {
   const load = useServerFn(listChatwootLogs);
-  const qc = useQueryClient();
   const [group, setGroup] = useState("all");
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [live, setLive] = useState(true);
-  const [pulse, setPulse] = useState(false);
+  const pulse = false;
 
   const query = useQuery({
     queryKey: ["chatwoot-logs", clientId, group],
     queryFn: () => load({ data: { client_id: clientId, group, limit: 200 } }),
     refetchOnWindowFocus: false,
+    refetchInterval: live ? 3_000 : false,
   });
-
-  useEffect(() => {
-    if (!live) return;
-    const channel = supabase
-      .channel(`cw-logs-${clientId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "chatwoot_integration_logs",
-          filter: `client_id=eq.${clientId}`,
-        },
-        () => {
-          setPulse(true);
-          setTimeout(() => setPulse(false), 800);
-          qc.invalidateQueries({ queryKey: ["chatwoot-logs", clientId] });
-        },
-      )
-      .subscribe();
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [clientId, live, qc]);
 
   const rows = (query.data as Row[] | undefined) ?? [];
   const stats = useMemo(() => {
@@ -204,7 +179,7 @@ export function ChatwootLogsCard({ clientId }: { clientId: string }) {
               variant="outline"
               size="sm"
               disabled={query.isFetching}
-              onClick={() => qc.invalidateQueries({ queryKey: ["chatwoot-logs", clientId] })}
+              onClick={() => query.refetch()}
             >
               <RefreshCw className={`mr-1 h-3 w-3 ${query.isFetching ? "animate-spin" : ""}`} />
               Recargar

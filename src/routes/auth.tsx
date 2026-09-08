@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { authClient } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -21,7 +21,7 @@ function AuthPage() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
+    authClient.auth.getSession().then(({ data }) => {
       if (data.session) navigate({ to: "/dashboard" });
     });
   }, [navigate]);
@@ -29,7 +29,7 @@ function AuthPage() {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    const { error } = await authClient.auth.signInWithPassword({ email, password });
     setLoading(false);
     if (error) {
       toast.error("No se pudo iniciar sesión", { description: error.message });
@@ -113,7 +113,7 @@ function AuthPage() {
             </form>
             <p className="mt-6 text-xs text-muted-foreground">
               El registro público está desactivado. Un administrador debe crear tu usuario desde el
-              panel de Lovable Cloud.
+              servidor mediante el procedimiento de administración.
             </p>
           </CardContent>
         </Card>

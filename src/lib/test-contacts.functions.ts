@@ -1,9 +1,9 @@
 import { createServerFn } from "@tanstack/react-start";
-import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { requireDatabaseAuth } from "@/integrations/database/auth-middleware";
 import { z } from "zod";
 
-async function assertAdmin(supabase: any, userId: string) {
-  const { data } = await supabase
+async function assertAdmin(database: any, userId: string) {
+  const { data } = await database
     .from("user_roles")
     .select("role")
     .eq("user_id", userId)
@@ -13,13 +13,13 @@ async function assertAdmin(supabase: any, userId: string) {
 }
 
 export const listTestContacts = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireDatabaseAuth])
   .inputValidator((input: { client_id: string }) =>
     z.object({ client_id: z.string().uuid() }).parse(input),
   )
   .handler(async ({ context, data }) => {
-    await assertAdmin(context.supabase, context.userId);
-    const { data: rows, error } = await context.supabase
+    await assertAdmin(context.database, context.userId);
+    const { data: rows, error } = await context.database
       .from("test_contacts")
       .select("id, label, phone, created_at")
       .eq("client_id", data.client_id)
@@ -29,7 +29,7 @@ export const listTestContacts = createServerFn({ method: "GET" })
   });
 
 export const createTestContact = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireDatabaseAuth])
   .inputValidator((input: { client_id: string; label: string; phone: string }) =>
     z.object({
       client_id: z.string().uuid(),
@@ -38,10 +38,10 @@ export const createTestContact = createServerFn({ method: "POST" })
     }).parse(input),
   )
   .handler(async ({ context, data }) => {
-    await assertAdmin(context.supabase, context.userId);
+    await assertAdmin(context.database, context.userId);
     const phone = data.phone.replace(/[^\d]/g, "");
     if (phone.length < 6) throw new Error("Número inválido");
-    const { data: row, error } = await context.supabase
+    const { data: row, error } = await context.database
       .from("test_contacts")
       .insert({ client_id: data.client_id, label: data.label, phone })
       .select("id, label, phone, created_at")
@@ -51,11 +51,11 @@ export const createTestContact = createServerFn({ method: "POST" })
   });
 
 export const deleteTestContact = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireDatabaseAuth])
   .inputValidator((input: { id: string }) => z.object({ id: z.string().uuid() }).parse(input))
   .handler(async ({ context, data }) => {
-    await assertAdmin(context.supabase, context.userId);
-    const { error } = await context.supabase.from("test_contacts").delete().eq("id", data.id);
+    await assertAdmin(context.database, context.userId);
+    const { error } = await context.database.from("test_contacts").delete().eq("id", data.id);
     if (error) throw new Error(error.message);
     return { ok: true };
   });

@@ -1,73 +1,82 @@
-# WhatsApp Onboarding — Tech Provider
+# Conecta WABA — router multi-cliente
 
-Panel interno para hacer onboarding de clientes de WhatsApp Business Platform usando **Meta Embedded Signup** en modo **WhatsApp Business App Onboarding / Coexistence**.
+Router y panel de administración para operar múltiples clientes de WhatsApp Business Platform. Recibe los webhooks de Meta, identifica al cliente por `phone_number_id`, conserva trazabilidad, deduplica mensajes y los dirige a la integración de n8n y/o Chatwoot configurada para ese cliente.
 
-## Flujo
-
-1. Un administrador entra al panel (`/auth`) y crea un cliente.
-2. Genera un **enlace de conexión único** para ese cliente.
-3. El cliente abre el enlace (`/connect/:token`) e inicia Meta Embedded Signup.
-4. El servidor intercambia el `code` por un access token, guarda los datos, y suscribe la app al WABA.
-5. Los eventos de WhatsApp llegan al webhook y se reenvían automáticamente a **n8n**.
+Esta rama funciona sobre infraestructura propia. No requiere Lovable, Supabase ni Cloudflare en tiempo de ejecución.
 
 ## Arquitectura
 
-- **Frontend**: TanStack Start (React + TS). Nunca ve el App Secret ni el access token.
-- **Backend**: Server routes (`/api/public/*`) para llamadas externas y server functions para operaciones autenticadas de administrador.
-- **DB**: Lovable Cloud (Postgres + RLS).
+- Aplicación: TanStack Start sobre Node.js 22.
+- Base de datos: PostgreSQL 17 directo mediante `pg`.
+- Sesiones: cookie `HttpOnly` y tokens aleatorios almacenados como hash SHA-256.
+- Secretos operativos: AES-256-GCM con una clave externa `DATA_ENCRYPTION_KEY`.
+- Entrada HTTPS: Caddy con certificados automáticos.
+- Despliegue: Docker Compose con servicios `app`, `postgres` y `caddy`.
+- Actualización del panel: polling corto; no depende de Supabase Realtime.
 
-## Tablas
+## Flujo principal
 
-- `clients` — clientes finales.
-- `onboarding_links` — tokens únicos con vencimiento.
-- `whatsapp_accounts` — datos de la conexión (WABA, número, token cifrado).
-- `webhook_events` — todos los eventos recibidos de Meta.
-- `user_roles` — roles admin/user.
+1. El administrador inicia sesión en `/auth` y crea un cliente.
+2. Genera un enlace único de onboarding.
+3. El cliente completa Meta Embedded Signup en `/connect/:token`.
+4. El backend intercambia el código, almacena la cuenta y suscribe el WABA.
+5. Meta entrega los eventos a `/api/public/whatsapp/webhook`.
+6. El router encuentra al cliente y entrega el mensaje a su n8n o lo sincroniza con Chatwoot.
 
-## Endpoints del servidor
+## Desarrollo local
 
-| Ruta | Método | Uso |
-|------|--------|-----|
-| `/api/public/onboarding/validate` | POST | Valida un token público de onboarding. |
-| `/api/public/onboarding/complete` | POST | Recibe el `code` de Meta, intercambia el token, guarda la cuenta, suscribe el webhook. |
-| `/api/public/whatsapp/webhook` | GET/POST | Verificación + recepción de eventos. Reenvía a n8n. |
-| `/api/public/meta-config` | GET | Expone `META_APP_ID` y `META_CONFIGURATION_ID` (identificadores públicos, no secretos). |
-| `sendWhatsAppMessage` (server fn) | — | Envía mensajes desde el panel usando el token del cliente (nunca expuesto al browser). |
+Requisitos: Node.js 22 y un PostgreSQL accesible.
 
-## Variables de entorno requeridas
+```bash
+npm ci
+export DATABASE_URL='postgresql://usuario:password@127.0.0.1:5432/conecta_waba'
+export DATABASE_SSL=disable
+npm run db:migrate
+npm run dev
+```
 
-Configurar en Lovable Cloud → Secrets:
+Para crear o restablecer el administrador:
 
-| Variable | Descripción |
-|----------|-------------|
-| `META_APP_ID` | ID público de la app de Meta. |
-| `META_APP_SECRET` | 🔒 App Secret. **Nunca en frontend.** |
-| `META_CONFIGURATION_ID` | ID de la configuración de Embedded Signup. |
-| `META_GRAPH_API_VERSION` | Ej. `v21.0`. |
-| `WHATSAPP_VERIFY_TOKEN` | Cadena aleatoria; pégala en Meta al configurar el webhook. |
-| `N8N_WHATSAPP_WEBHOOK_URL` | URL del webhook en tu n8n. |
-| `N8N_WEBHOOK_SECRET` | Se envía en el header `x-internal-secret` al reenviar a n8n. |
+```bash
+export ADMIN_EMAIL='admin@tu-dominio.com'
+export ADMIN_PASSWORD='una-clave-de-al-menos-12-caracteres'
+export ADMIN_NAME='Administrador'
+npm run admin:create
+```
 
-## Configuración de Meta
+## Despliegue en VPS
 
-1. En tu app de Meta, activa el producto **WhatsApp** y luego **Embedded Signup**.
-2. Crea una **Configuration** de Embedded Signup en modo *WhatsApp Business App Onboarding (Coexistence)* y copia su ID a `META_CONFIGURATION_ID`.
-3. En el webhook de la app, configura:
-   - **Callback URL**: `https://<tu-dominio>/api/public/whatsapp/webhook`
-   - **Verify Token**: el valor de `WHATSAPP_VERIFY_TOKEN`
-   - Subscribe a los campos relevantes (`messages`, `message_template_status_update`, etc.).
+La guía completa, incluida la migración de datos, validación, corte de tráfico y rollback, está en [docs/vps-deployment.md](docs/vps-deployment.md).
 
-## Crear el primer administrador
+Inicio resumido:
 
-Como el registro público está deshabilitado:
+```bash
+cp .env.vps.example .env.vps
+# Completar todos los valores reales en .env.vps
+docker compose --env-file .env.vps up -d --build
+docker compose --env-file .env.vps --profile tools run --rm admin
+curl -fsS https://tu-dominio/api/health
+```
 
-1. En Lovable Cloud → Users, crea manualmente el usuario admin (email + password).
-2. En SQL: `INSERT INTO public.user_roles (user_id, role) VALUES ('<uuid>', 'admin');`
+## Comandos de verificación
 
-## TODOs pendientes de Meta
+```bash
+npx tsc --noEmit
+npm run build
+docker compose --env-file .env.vps config
+```
 
-Buscar `TODO Meta` en el código:
+## Seguridad y operación
 
-- `src/routes/api/public/onboarding/complete.ts` — confirmar parámetros exactos del intercambio de `code` para el flujo de Tech Provider / Coexistence, incluido `redirect_uri` si aplica.
-- `src/routes/connect.$token.tsx` — confirmar los `extras` exactos de `FB.login()` para *WhatsApp Business App Onboarding (Coexistence)*.
-- Cifrado adicional para `token_encrypted` (actualmente se guarda como texto en una tabla ya protegida por RLS + service role). Considerar Supabase Vault o KMS antes de producción.
+- `.env` y `.env.vps` no se versionan.
+- PostgreSQL sólo existe dentro de la red privada de Compose; no publica el puerto 5432.
+- La app publica su puerto únicamente en loopback y Caddy es la entrada pública.
+- `META_APP_SECRET`, los tokens de WhatsApp y secretos de n8n/Chatwoot nunca se envían al navegador; los secretos por cliente se cifran en PostgreSQL.
+- Configura backups diarios y prueba la restauración antes del corte definitivo.
+- El esquema autónomo y sus migraciones viven en `database/migrations/`.
+
+## Documentación
+
+- [Contrato de endpoints](docs/api-endpoints.md)
+- [Despliegue y migración al VPS](docs/vps-deployment.md)
+- [Pruebas manuales de Chatwoot](docs/chatwoot-manual-tests.md)

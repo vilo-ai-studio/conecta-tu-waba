@@ -1,1 +1,0 @@
-ALTER TABLE public.client_integrations ADD COLUMN IF NOT EXISTS chatwoot_webhook_signature_enabled BOOLEAN NOT NULL DEFAULT true;

@@ -242,7 +242,7 @@ export const Route = createFileRoute("/api/public/chatwoot/webhook")({
           return Response.json({ ok: true, ignored: "empty_content" });
         }
 
-        const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { databaseAdmin } = await import("@/integrations/database/client.server");
 
         // Strict dedup: RESERVE the chatwoot_message_id BEFORE calling Meta.
         // Unique index (client_id, chatwoot_message_id) rejects a duplicate,
@@ -257,7 +257,7 @@ export const Route = createFileRoute("/api/public/chatwoot/webhook")({
           return Response.json({ ok: true, ignored: "no_wa_id_mapping" });
         }
 
-        const reserve = await supabaseAdmin
+        const reserve = await databaseAdmin
           .from("chatwoot_message_mappings")
           .insert({
             client_id: cfg.client_id,
@@ -302,7 +302,7 @@ export const Route = createFileRoute("/api/public/chatwoot/webhook")({
           },
         );
 
-        const { data: acct } = await supabaseAdmin
+        const { data: acct } = await databaseAdmin
           .from("whatsapp_accounts")
           .select("id, phone_number_id, token_encrypted, status")
           .eq("client_id", cfg.client_id)
@@ -352,7 +352,7 @@ export const Route = createFileRoute("/api/public/chatwoot/webhook")({
           ? metaJson?.error?.message ?? networkErr ?? `HTTP ${httpStatus}`
           : null;
 
-        await supabaseAdmin.from("whatsapp_send_logs").insert({
+        await databaseAdmin.from("whatsapp_send_logs").insert({
           client_id: cfg.client_id,
           whatsapp_account_id: acct.id,
           phone_number_id: acct.phone_number_id,

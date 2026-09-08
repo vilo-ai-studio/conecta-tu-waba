@@ -73,10 +73,10 @@ export const Route = createFileRoute("/api/public/whatsapp/send-message")({
             return Response.json({ ok: false, error: "unsupported_type" }, { status: 400 });
           }
 
-          const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { databaseAdmin } = await import("@/integrations/database/client.server");
 
           // 1) Buscar cliente + secreto n8n
-          const { data: client, error: cErr } = await supabaseAdmin
+          const { data: client, error: cErr } = await databaseAdmin
             .from("clients")
             .select("id, n8n_enabled, n8n_webhook_secret_encrypted")
             .eq("id", body.client_id)
@@ -92,7 +92,7 @@ export const Route = createFileRoute("/api/public/whatsapp/send-message")({
           }
 
           // 2) Cuenta WhatsApp conectada del cliente
-          const { data: acct, error: aErr } = await supabaseAdmin
+          const { data: acct, error: aErr } = await databaseAdmin
             .from("whatsapp_accounts")
             .select("id, phone_number_id, token_encrypted, status")
             .eq("client_id", client.id)
@@ -112,7 +112,7 @@ export const Route = createFileRoute("/api/public/whatsapp/send-message")({
           // (es un evento efímero, no una respuesta).
           const inboundMessageId = body.inbound_message_id?.trim() || null;
           if (inboundMessageId && !isTypingIndicator) {
-            const { data: prior } = await supabaseAdmin
+            const { data: prior } = await databaseAdmin
               .from("whatsapp_send_logs")
               .select("id, meta_message_id")
               .eq("client_id", client.id)
@@ -122,7 +122,7 @@ export const Route = createFileRoute("/api/public/whatsapp/send-message")({
               .maybeSingle();
             if (prior?.id) {
               console.log("[send-message] reply_deduped", { inboundMessageId, prior_id: prior.id });
-              await supabaseAdmin.from("message_send_logs").insert({
+              await databaseAdmin.from("message_send_logs").insert({
                 client_id: client.id,
                 phone_number_id: null,
                 to: String(body.to ?? "").replace(/[^\d]/g, ""),
@@ -226,7 +226,7 @@ export const Route = createFileRoute("/api/public/whatsapp/send-message")({
 
           const toDigits = String(body.to ?? "").replace(/[^\d]/g, "");
 
-          await supabaseAdmin.from("message_send_logs").insert({
+          await databaseAdmin.from("message_send_logs").insert({
             client_id: client.id,
             phone_number_id: acct.phone_number_id,
             to: toDigits,
@@ -240,7 +240,7 @@ export const Route = createFileRoute("/api/public/whatsapp/send-message")({
             request_payload: metaBody,
           } as any);
 
-          await supabaseAdmin.from("whatsapp_send_logs").insert({
+          await databaseAdmin.from("whatsapp_send_logs").insert({
             client_id: client.id,
             whatsapp_account_id: acct.id,
             phone_number_id: acct.phone_number_id,
@@ -285,7 +285,7 @@ export const Route = createFileRoute("/api/public/whatsapp/send-message")({
             // creating a new one under the "to" variant the caller sent.
             let mirrorWaId: string | null = null;
             if (inboundMessageId) {
-              const { supabaseAdmin: sa } = await import("@/integrations/supabase/client.server");
+              const { databaseAdmin: sa } = await import("@/integrations/database/client.server");
               const { data: inboundMap } = await sa
                 .from("chatwoot_message_mappings")
                 .select("wa_id")

@@ -1,6 +1,6 @@
 // Server-only helper. Never import from client-reachable modules at top level.
 // Use dynamic `await import(...)` inside route/server-fn handlers.
-import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { databaseAdmin } from "@/integrations/database/client.server";
 import { normalizeWaId } from "@/lib/wa-id";
 
 export type ChatwootConfig = {
@@ -18,7 +18,7 @@ function normalizeBaseUrl(url: string): string {
 }
 
 async function loadChatwootConfig(clientId: string): Promise<ChatwootConfig | null> {
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await databaseAdmin
     .from("client_integrations")
     .select(
       "chatwoot_enabled, chatwoot_base_url, chatwoot_account_id, chatwoot_inbox_id, chatwoot_api_access_token_encrypted, chatwoot_bot_pause_label, pause_on_assigned",
@@ -72,7 +72,7 @@ async function logCw(
   extras: Record<string, any> = {},
 ) {
   try {
-    await supabaseAdmin.from("chatwoot_integration_logs").insert({
+    await databaseAdmin.from("chatwoot_integration_logs").insert({
       client_id: clientId,
       event_type,
       direction,
@@ -90,7 +90,7 @@ async function ensureContact(
   profileName: string | null,
 ): Promise<string | null> {
   // Try local mapping first.
-  const existing = await supabaseAdmin
+  const existing = await databaseAdmin
     .from("chatwoot_contact_mappings")
     .select("chatwoot_contact_id")
     .eq("client_id", cfg.client_id)
@@ -137,7 +137,7 @@ async function ensureContact(
     }
   }
 
-  await supabaseAdmin
+  await databaseAdmin
     .from("chatwoot_contact_mappings")
     .upsert(
       {
@@ -157,7 +157,7 @@ async function ensureConversation(
   waId: string,
   contactId: string,
 ): Promise<string | null> {
-  const existing = await supabaseAdmin
+  const existing = await databaseAdmin
     .from("chatwoot_conversation_mappings")
     .select("chatwoot_conversation_id, status")
     .eq("client_id", cfg.client_id)
@@ -211,7 +211,7 @@ async function ensureConversation(
     }
   }
 
-  await supabaseAdmin
+  await databaseAdmin
     .from("chatwoot_conversation_mappings")
     .upsert(
       {
@@ -226,7 +226,7 @@ async function ensureConversation(
   // Re-read to detect if a concurrent handler beat us to creating the mapping.
   // Unique(client_id, wa_id) means the FIRST upsert wins; ours might have been
   // silently replaced by an earlier one with a different conv id. Fetch canonical.
-  const canonical = await supabaseAdmin
+  const canonical = await databaseAdmin
     .from("chatwoot_conversation_mappings")
     .select("chatwoot_conversation_id")
     .eq("client_id", cfg.client_id)
@@ -299,7 +299,7 @@ async function refreshConversationState(
   const bot_paused =
     labelList.includes(cfg.pause_label) || (cfg.pause_on_assigned && !!assigneeId);
 
-  await supabaseAdmin
+  await databaseAdmin
     .from("chatwoot_conversation_mappings")
     .update({
       status,
@@ -344,7 +344,7 @@ export async function syncInboundToChatwoot(params: {
 
     // Anti-loop: if this wa_message_id was already mirrored, skip re-posting.
     if (params.wa_message_id) {
-      const dup = await supabaseAdmin
+      const dup = await databaseAdmin
         .from("chatwoot_message_mappings")
         .select("chatwoot_message_id, chatwoot_conversation_id")
         .eq("client_id", cfg.client_id)
@@ -379,7 +379,7 @@ export async function syncInboundToChatwoot(params: {
       params.message_type,
     );
 
-    await supabaseAdmin.from("chatwoot_message_mappings").insert({
+    await databaseAdmin.from("chatwoot_message_mappings").insert({
       client_id: cfg.client_id,
       wa_id: params.wa_id,
       inbound_message_id: params.wa_message_id,
@@ -401,7 +401,7 @@ export async function syncInboundToChatwoot(params: {
 
     // Detect reopen: if we had a resolved conversation locally and Chatwoot
     // now returns open (Chatwoot auto-reopens on new incoming message), log it.
-    const priorConv = await supabaseAdmin
+    const priorConv = await databaseAdmin
       .from("chatwoot_conversation_mappings")
       .select("status")
       .eq("client_id", cfg.client_id)
@@ -422,7 +422,7 @@ export async function syncInboundToChatwoot(params: {
       });
     }
 
-    await supabaseAdmin
+    await databaseAdmin
       .from("client_integrations")
       .update({ last_sync_at: new Date().toISOString() })
       .eq("client_id", cfg.client_id);
@@ -472,7 +472,7 @@ export async function mirrorOutboundToChatwoot(params: {
 
     // Anti-loop: if this meta_message_id was already mirrored, skip.
     if (params.meta_message_id) {
-      const dup = await supabaseAdmin
+      const dup = await databaseAdmin
         .from("chatwoot_message_mappings")
         .select("id, chatwoot_conversation_id, chatwoot_message_id")
         .eq("client_id", cfg.client_id)
@@ -491,7 +491,7 @@ export async function mirrorOutboundToChatwoot(params: {
     // conversation from "to" alone if we can avoid it).
     // 1) Try mapping by (client_id, wa_id).
     // 2) If missing, try to resolve via the triggering inbound message.
-    let convMap = await supabaseAdmin
+    let convMap = await databaseAdmin
       .from("chatwoot_conversation_mappings")
       .select("chatwoot_conversation_id, chatwoot_contact_id, wa_id")
       .eq("client_id", cfg.client_id)
@@ -500,7 +500,7 @@ export async function mirrorOutboundToChatwoot(params: {
 
     let resolvedFromInbound = false;
     if (!convMap.data?.chatwoot_conversation_id && params.inbound_message_id) {
-      const { data: inboundMap } = await supabaseAdmin
+      const { data: inboundMap } = await databaseAdmin
         .from("chatwoot_message_mappings")
         .select("chatwoot_conversation_id, wa_id")
         .eq("client_id", cfg.client_id)
@@ -562,7 +562,7 @@ export async function mirrorOutboundToChatwoot(params: {
     );
     const chatwootMessageId = res.body?.id ? String(res.body.id) : null;
 
-    await supabaseAdmin.from("chatwoot_message_mappings").insert({
+    await databaseAdmin.from("chatwoot_message_mappings").insert({
       client_id: cfg.client_id,
       wa_id: params.wa_id,
       outbound_message_id: params.meta_message_id,
@@ -602,7 +602,7 @@ export async function loadChatwootConfigForWebhook(
   chatwootAccountId: string,
   chatwootInboxId: string,
 ): Promise<(ChatwootConfig & { webhook_secret: string | null; signature_enabled: boolean }) | null> {
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await databaseAdmin
     .from("client_integrations")
     .select(
       "client_id, chatwoot_enabled, chatwoot_base_url, chatwoot_account_id, chatwoot_inbox_id, chatwoot_api_access_token_encrypted, chatwoot_webhook_secret_encrypted, chatwoot_webhook_signature_enabled, chatwoot_bot_pause_label, pause_on_assigned",
@@ -635,7 +635,7 @@ export async function lookupWaIdForConversation(
   clientId: string,
   chatwootConversationId: string,
 ): Promise<string | null> {
-  const { data } = await supabaseAdmin
+  const { data } = await databaseAdmin
     .from("chatwoot_conversation_mappings")
     .select("wa_id")
     .eq("client_id", clientId)
@@ -649,7 +649,7 @@ export async function chatwootMessageAlreadyMirrored(
   clientId: string,
   chatwootMessageId: string,
 ): Promise<boolean> {
-  const { data } = await supabaseAdmin
+  const { data } = await databaseAdmin
     .from("chatwoot_message_mappings")
     .select("id")
     .eq("client_id", clientId)
@@ -667,7 +667,7 @@ export async function recordChatwootAgentSend(params: {
 }) {
   // The webhook reserves a row keyed on (client_id, chatwoot_message_id) BEFORE
   // calling Meta. Now that we have the meta_message_id, update it in place.
-  const upd = await supabaseAdmin
+  const upd = await databaseAdmin
     .from("chatwoot_message_mappings")
     .update({
       outbound_message_id: params.meta_message_id,
@@ -682,7 +682,7 @@ export async function recordChatwootAgentSend(params: {
 
   if (!upd.data?.id) {
     // No reservation existed (e.g. race edge case) — insert fresh.
-    await supabaseAdmin.from("chatwoot_message_mappings").insert({
+    await databaseAdmin.from("chatwoot_message_mappings").insert({
       client_id: params.client_id,
       wa_id: params.wa_id,
       outbound_message_id: params.meta_message_id,
@@ -721,7 +721,7 @@ export async function applyChatwootConversationState(params: {
   previous_bot_paused: boolean | null;
   wa_id: string | null;
 }> {
-  const prior = await supabaseAdmin
+  const prior = await databaseAdmin
     .from("chatwoot_conversation_mappings")
     .select("wa_id, bot_paused, labels, status")
     .eq("client_id", params.client_id)
@@ -742,7 +742,7 @@ export async function applyChatwootConversationState(params: {
   if (params.assignee_id !== undefined) patch.assignee_id = params.assignee_id;
 
   if (prior.data?.wa_id) {
-    await supabaseAdmin
+    await databaseAdmin
       .from("chatwoot_conversation_mappings")
       .update(patch as any)
       .eq("client_id", params.client_id)
@@ -777,7 +777,7 @@ export async function checkChatwootRateLimit(
   const maxEvents = opts?.max_events ?? DEFAULT_MAX_EVENTS;
 
   // Unhealthy short-circuit.
-  const { data: ci } = await supabaseAdmin
+  const { data: ci } = await databaseAdmin
     .from("client_integrations")
     .select("chatwoot_unhealthy, chatwoot_unhealthy_since")
     .eq("client_id", clientId)
@@ -793,7 +793,7 @@ export async function checkChatwootRateLimit(
       };
     }
     // Cooldown elapsed — clear the flag so traffic can resume.
-    await supabaseAdmin
+    await databaseAdmin
       .from("client_integrations")
       .update({
         chatwoot_unhealthy: false,
@@ -804,7 +804,7 @@ export async function checkChatwootRateLimit(
   }
 
   const since = new Date(Date.now() - windowMs).toISOString();
-  const { count, error } = await supabaseAdmin
+  const { count, error } = await databaseAdmin
     .from("chatwoot_integration_logs")
     .select("id", { head: true, count: "exact" })
     .eq("client_id", clientId)
@@ -817,7 +817,7 @@ export async function checkChatwootRateLimit(
   }
 
   // Health check: too many recent errors → mark unhealthy proactively.
-  const { count: errCount } = await supabaseAdmin
+  const { count: errCount } = await databaseAdmin
     .from("chatwoot_integration_logs")
     .select("id", { head: true, count: "exact" })
     .eq("client_id", clientId)
@@ -836,7 +836,7 @@ export async function checkChatwootRateLimit(
 }
 
 export async function markChatwootUnhealthy(clientId: string, reason: string) {
-  await supabaseAdmin
+  await databaseAdmin
     .from("client_integrations")
     .update({
       chatwoot_unhealthy: true,
@@ -845,4 +845,3 @@ export async function markChatwootUnhealthy(clientId: string, reason: string) {
     } as any)
     .eq("client_id", clientId);
 }
-

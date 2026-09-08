@@ -4,10 +4,10 @@ Todos los endpoints públicos viven bajo `/api/public/*` y **bypassean autentica
 en el sitio publicado. La seguridad se implementa dentro de cada handler
 (firma HMAC, secreto compartido, token de onboarding, etc.).
 
-Base URLs estables:
-- Producción: `https://project--{project-id}.lovable.app`
-- Preview: `https://project--{project-id}-dev.lovable.app`
-- Dominio custom actual: `https://connect.buho-solutions.com`
+Base URL de producción:
+
+- `https://<DOMAIN>` donde `DOMAIN` es el host configurado en `.env.vps`.
+- Dominio previsto actualmente: `https://connect.buho-solutions.com` (DNS y corte: **Por confirmar**).
 
 ---
 
@@ -19,6 +19,7 @@ Expone identificadores públicos de Meta al navegador (para Embedded Signup).
 **Request:** sin body.
 
 **Response 200 (JSON):**
+
 ```json
 {
   "appId": "string | null",
@@ -41,6 +42,7 @@ y un `onboarding_links` con token de 30 días.
 **Auth:** ninguna (endpoint público de captación).
 
 **Request body (JSON):**
+
 ```json
 {
   "name": "string (1..200, requerido)",
@@ -51,11 +53,13 @@ y un `onboarding_links` con token de 30 días.
 ```
 
 **Response 200:**
+
 ```json
 { "ok": true, "token": "hex de ≥32 chars" }
 ```
 
 **Errores:**
+
 - `400 { ok:false, error:"invalid_name" | "invalid_email" }`
 - `500 { ok:false, error:"db_error" | "token_gen_failed" | "server_error" }`
 
@@ -66,11 +70,13 @@ y un `onboarding_links` con token de 30 días.
 Valida el token de onboarding sin exponer ids internos.
 
 **Request body:**
+
 ```json
 { "token": "string (≥16 chars)" }
 ```
 
 **Response 200 (válido):**
+
 ```json
 {
   "valid": true,
@@ -81,6 +87,7 @@ Valida el token de onboarding sin exponer ids internos.
 ```
 
 **Errores:**
+
 - `400 { valid:false, reason:"invalid_token" }`
 - `404 { valid:false, reason:"not_found" }`
 - `410 { valid:false, reason:"already_used" | "expired" }`
@@ -94,6 +101,7 @@ Llamado tras Meta Embedded Signup. Intercambia `code` → access token,
 consulta datos del número, suscribe la app al WABA y guarda `whatsapp_accounts`.
 
 **Request body:**
+
 ```json
 {
   "token": "onboarding token (requerido)",
@@ -105,11 +113,13 @@ consulta datos del número, suscribe la app al WABA y guarda `whatsapp_accounts`
 ```
 
 **Response 200:**
+
 ```json
 { "ok": true, "webhook_subscribed": true }
 ```
 
 **Errores:**
+
 - `400 { ok:false, error:"missing_params" | "missing_meta_ids" }`
 - `404 { ok:false, error:"invalid_token" }`
 - `410 { ok:false, error:"already_used" | "expired" }`
@@ -125,6 +135,7 @@ consulta datos del número, suscribe la app al WABA y guarda `whatsapp_accounts`
 Verificación del webhook de Meta.
 
 **Query params:**
+
 - `hub.mode=subscribe`
 - `hub.verify_token=<WHATSAPP_VERIFY_TOKEN del server>`
 - `hub.challenge=<echo>`
@@ -141,6 +152,7 @@ Recibe eventos de Meta (mensajes entrantes y status updates).
 **Auth:** ninguna (Meta no firma; se identifica al cliente por `phone_number_id`).
 
 **Comportamiento:**
+
 1. Guarda **siempre** el payload crudo en `raw_meta_webhook_events` (incluye
    detección heurística del botón "Test" de Meta Developers).
 2. Registra cada change en `meta_webhook_events`.
@@ -159,6 +171,7 @@ Recibe eventos de Meta (mensajes entrantes y status updates).
 **Payload enviado a n8n** (`POST` al `n8n_webhook_url` del cliente):
 
 Headers:
+
 ```
 content-type: application/json
 X-Client-ID: <uuid>
@@ -167,6 +180,7 @@ X-N8N-Webhook-Secret: <secreto compartido>
 ```
 
 Body (mensaje):
+
 ```json
 {
   "source": "meta_whatsapp",
@@ -196,6 +210,7 @@ token de Meta.
 `clients.n8n_webhook_secret_encrypted`.
 
 **Body — texto:**
+
 ```json
 {
   "client_id": "uuid (requerido)",
@@ -207,6 +222,7 @@ token de Meta.
 ```
 
 **Body — template:**
+
 ```json
 {
   "client_id": "uuid",
@@ -219,11 +235,13 @@ token de Meta.
 ```
 
 **Response 200 (éxito):**
+
 ```json
 { "ok": true, "message_id": "wamid...", "meta": { ...respuesta cruda de Meta } }
 ```
 
 **Response 200 (dedup):**
+
 ```json
 {
   "success": true,
@@ -234,6 +252,7 @@ token de Meta.
 ```
 
 **Errores:**
+
 - `400 { ok:false, error:"missing_params" | "unsupported_type", detail }`
 - `401 { ok:false, error:"invalid_secret" }`
 - `403 { ok:false, error:"n8n_not_configured" }`
@@ -243,6 +262,7 @@ token de Meta.
 - `502 { ok:false, error:"meta_error", status, detail }`
 
 **Efectos secundarios:**
+
 - Log en `message_send_logs` y `whatsapp_send_logs` (con payload crudo,
   código y mensaje de error de Meta si aplica).
 - Mirror del outgoing a Chatwoot (`source:"n8n"`), reutilizando la
@@ -264,6 +284,7 @@ query `?kind=`:
 
 **Auth (opcional por cliente):** HMAC-SHA256 hex del body crudo con
 `chatwoot_webhook_secret_encrypted` en header `X-Chatwoot-Signature`.
+
 - Se verifica solo si `chatwoot_webhook_signature_enabled=true` y hay secreto.
 - Firma inválida → `401 invalid signature`.
 
@@ -273,6 +294,7 @@ Motivo: Chatwoot marca `Error al enviar` en cualquier respuesta no-2xx del
 webhook de outgoing.
 
 **Response 200 típica:**
+
 ```json
 { "ok": true, "forwarded": true, "meta_message_id": "wamid..." }
 { "ok": true, "ignored": "message_created_on_global_webhook" }

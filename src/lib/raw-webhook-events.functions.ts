@@ -1,9 +1,9 @@
 import { createServerFn } from "@tanstack/react-start";
-import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { requireDatabaseAuth } from "@/integrations/database/auth-middleware";
 import { z } from "zod";
 
-async function assertAdmin(supabase: any, userId: string) {
-  const { data } = await supabase
+async function assertAdmin(database: any, userId: string) {
+  const { data } = await database
     .from("user_roles")
     .select("role")
     .eq("user_id", userId)
@@ -16,7 +16,7 @@ async function assertAdmin(supabase: any, userId: string) {
 // público. Incluye eventos sin phone_number_id (por ej. el botón Test de
 // Meta Developers).
 export const listRawWebhookEvents = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireDatabaseAuth])
   .inputValidator((input: { limit?: number; phone_number_id?: string | null }) =>
     z.object({
       limit: z.number().int().min(1).max(500).optional(),
@@ -24,9 +24,9 @@ export const listRawWebhookEvents = createServerFn({ method: "GET" })
     }).parse(input),
   )
   .handler(async ({ context, data }) => {
-    await assertAdmin(context.supabase, context.userId);
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    let q = supabaseAdmin
+    await assertAdmin(context.database, context.userId);
+    const { databaseAdmin } = await import("@/integrations/database/client.server");
+    let q = databaseAdmin
       .from("raw_meta_webhook_events")
       .select("*")
       .order("received_at", { ascending: false })

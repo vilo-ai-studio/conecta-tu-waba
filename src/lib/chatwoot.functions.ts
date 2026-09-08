@@ -1,9 +1,9 @@
 import { createServerFn } from "@tanstack/react-start";
-import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { requireDatabaseAuth } from "@/integrations/database/auth-middleware";
 import { z } from "zod";
 
-async function assertAdmin(supabase: any, userId: string) {
-  const { data } = await supabase
+async function assertAdmin(database: any, userId: string) {
+  const { data } = await database
     .from("user_roles")
     .select("role")
     .eq("user_id", userId)
@@ -18,14 +18,14 @@ function normalizeBaseUrl(url: string): string {
 
 // Devuelve la configuración de Chatwoot del cliente (sin exponer secretos en claro).
 export const getChatwootConfig = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireDatabaseAuth])
   .inputValidator((input: { client_id: string }) =>
     z.object({ client_id: z.string().uuid() }).parse(input),
   )
   .handler(async ({ context, data }) => {
-    await assertAdmin(context.supabase, context.userId);
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data: row, error } = await supabaseAdmin
+    await assertAdmin(context.database, context.userId);
+    const { databaseAdmin } = await import("@/integrations/database/client.server");
+    const { data: row, error } = await databaseAdmin
       .from("client_integrations")
       .select(
         "id, client_id, chatwoot_enabled, chatwoot_base_url, chatwoot_account_id, chatwoot_inbox_id, chatwoot_api_access_token_encrypted, chatwoot_webhook_secret_encrypted, chatwoot_webhook_signature_enabled, chatwoot_bot_pause_label, chatwoot_bot_active_label, pause_on_assigned, last_test_status, last_test_error, last_test_at, last_sync_at, updated_at",
@@ -72,7 +72,7 @@ export const getChatwootConfig = createServerFn({ method: "GET" })
   });
 
 export const updateChatwootConfig = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireDatabaseAuth])
   .inputValidator(
     (input: {
       client_id: string;
@@ -137,8 +137,8 @@ export const updateChatwootConfig = createServerFn({ method: "POST" })
         .parse(input),
   )
   .handler(async ({ context, data }) => {
-    await assertAdmin(context.supabase, context.userId);
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    await assertAdmin(context.database, context.userId);
+    const { databaseAdmin } = await import("@/integrations/database/client.server");
 
     const patch: Record<string, unknown> = {
       client_id: data.client_id,
@@ -163,7 +163,7 @@ export const updateChatwootConfig = createServerFn({ method: "POST" })
       patch.chatwoot_webhook_secret_encrypted = data.chatwoot_webhook_secret;
     }
 
-    const { data: existing } = await supabaseAdmin
+    const { data: existing } = await databaseAdmin
       .from("client_integrations")
       .select("id")
       .eq("client_id", data.client_id)
@@ -171,13 +171,13 @@ export const updateChatwootConfig = createServerFn({ method: "POST" })
 
     let error;
     if (existing?.id) {
-      const { error: uErr } = await supabaseAdmin
+      const { error: uErr } = await databaseAdmin
         .from("client_integrations")
         .update(patch as any)
         .eq("id", existing.id);
       error = uErr;
     } else {
-      const { error: iErr } = await supabaseAdmin
+      const { error: iErr } = await databaseAdmin
         .from("client_integrations")
         .insert(patch as any);
       error = iErr;
@@ -189,15 +189,15 @@ export const updateChatwootConfig = createServerFn({ method: "POST" })
 // Prueba de conexión: llama GET /api/v1/accounts/{account_id}/inboxes/{inbox_id}
 // con el api_access_token guardado. No expone el token; solo devuelve ok + detalle.
 export const testChatwootConnection = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireDatabaseAuth])
   .inputValidator((input: { client_id: string }) =>
     z.object({ client_id: z.string().uuid() }).parse(input),
   )
   .handler(async ({ context, data }) => {
-    await assertAdmin(context.supabase, context.userId);
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    await assertAdmin(context.database, context.userId);
+    const { databaseAdmin } = await import("@/integrations/database/client.server");
 
-    const { data: cfg, error } = await supabaseAdmin
+    const { data: cfg, error } = await databaseAdmin
       .from("client_integrations")
       .select(
         "id, chatwoot_base_url, chatwoot_account_id, chatwoot_inbox_id, chatwoot_api_access_token_encrypted",
@@ -242,7 +242,7 @@ export const testChatwootConnection = createServerFn({ method: "POST" })
       ? netErr ?? body?.message ?? body?.error ?? `HTTP ${httpStatus}`
       : null;
 
-    await supabaseAdmin.from("chatwoot_integration_logs").insert({
+    await databaseAdmin.from("chatwoot_integration_logs").insert({
       client_id: data.client_id,
       event_type: "test_connection",
       direction: "outgoing",
@@ -253,7 +253,7 @@ export const testChatwootConnection = createServerFn({ method: "POST" })
       error_message: errMsg,
     } as any);
 
-    await supabaseAdmin
+    await databaseAdmin
       .from("client_integrations")
       .update({
         last_test_status: ok ? "success" : "error",
@@ -270,16 +270,16 @@ export const testChatwootConnection = createServerFn({ method: "POST" })
 // Detecta conversaciones/contactos duplicados para el mismo número real
 // agrupando por wa_id normalizado. NO borra nada: sólo lista para revisión.
 export const detectDuplicateChatwootConversations = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireDatabaseAuth])
   .inputValidator((input: { client_id: string }) =>
     z.object({ client_id: z.string().uuid() }).parse(input),
   )
   .handler(async ({ context, data }) => {
-    await assertAdmin(context.supabase, context.userId);
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    await assertAdmin(context.database, context.userId);
+    const { databaseAdmin } = await import("@/integrations/database/client.server");
     const { normalizeWaId } = await import("@/lib/wa-id");
 
-    const { data: rows, error } = await supabaseAdmin
+    const { data: rows, error } = await databaseAdmin
       .from("chatwoot_conversation_mappings")
       .select(
         "wa_id, chatwoot_conversation_id, chatwoot_contact_id, status, bot_paused, created_at",
@@ -308,7 +308,7 @@ export const detectDuplicateChatwootConversations = createServerFn({ method: "GE
       duplicates.push({ canonical_wa_id, canonical, duplicates: dups });
 
       // Log detección (una vez por grupo).
-      await supabaseAdmin.from("chatwoot_integration_logs").insert({
+      await databaseAdmin.from("chatwoot_integration_logs").insert({
         client_id: data.client_id,
         event_type: "chatwoot_duplicate_conversation_detected",
         direction: null,

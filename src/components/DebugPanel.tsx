@@ -1,7 +1,6 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { useQuery } from "@tanstack/react-query";
 import { listMetaEvents, listN8nForwards, listWhatsAppSends } from "@/lib/debug-logs.functions";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -47,7 +46,6 @@ function CollapsibleJSON({ data, label = "Ver detalle" }: { data: any; label?: s
 }
 
 export function DebugPanel({ clientId }: { clientId: string }) {
-  const queryClient = useQueryClient();
   const listMeta = useServerFn(listMetaEvents);
   const listFwd = useServerFn(listN8nForwards);
   const listSends = useServerFn(listWhatsAppSends);
@@ -55,61 +53,18 @@ export function DebugPanel({ clientId }: { clientId: string }) {
   const metaQ = useQuery({
     queryKey: ["debug-meta", clientId],
     queryFn: () => listMeta({ data: { client_id: clientId, limit: 100 } }),
+    refetchInterval: 5_000,
   });
   const fwdQ = useQuery({
     queryKey: ["debug-fwd", clientId],
     queryFn: () => listFwd({ data: { client_id: clientId, limit: 100 } }),
+    refetchInterval: 5_000,
   });
   const sendQ = useQuery({
     queryKey: ["debug-send", clientId],
     queryFn: () => listSends({ data: { client_id: clientId, limit: 100 } }),
+    refetchInterval: 5_000,
   });
-
-  // Realtime: cualquier cambio en las 3 tablas -> refetch.
-  useEffect(() => {
-    const ch = supabase
-      .channel(`debug-${clientId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "meta_webhook_events",
-          filter: `client_id=eq.${clientId}`,
-        },
-        () => {
-          queryClient.invalidateQueries({ queryKey: ["debug-meta", clientId] });
-        },
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "n8n_forward_logs",
-          filter: `client_id=eq.${clientId}`,
-        },
-        () => {
-          queryClient.invalidateQueries({ queryKey: ["debug-fwd", clientId] });
-        },
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "whatsapp_send_logs",
-          filter: `client_id=eq.${clientId}`,
-        },
-        () => {
-          queryClient.invalidateQueries({ queryKey: ["debug-send", clientId] });
-        },
-      )
-      .subscribe();
-    return () => {
-      supabase.removeChannel(ch);
-    };
-  }, [clientId, queryClient]);
 
   const refreshAll = () => {
     metaQ.refetch();
