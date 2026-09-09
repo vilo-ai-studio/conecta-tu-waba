@@ -12,6 +12,7 @@ import {
   retryAfterMilliseconds,
   retryDelayMs,
 } from "../src/lib/retry-policy";
+import { isMetaSubscriptionConfirmed } from "../src/lib/meta-subscription";
 
 test("firma Meta válida, inválida, ausente y malformada", () => {
   process.env.META_APP_SECRET = "test-secret";
@@ -56,4 +57,12 @@ test("clasifica errores HTTP y respeta Retry-After", () => {
   assert.equal(retryAfterMilliseconds("12"), 12_000);
   const now = Date.parse("2026-09-07T12:00:00Z");
   assert.equal(retryAfterMilliseconds("Sun, 07 Sep 2026 12:00:30 GMT", now), 30_000);
+});
+
+test("la suscripción de Meta requiere confirmación explícita", () => {
+  assert.equal(isMetaSubscriptionConfirmed({ success: true }), true);
+  assert.equal(isMetaSubscriptionConfirmed({ success: false }), false);
+  assert.equal(isMetaSubscriptionConfirmed({ data: [] }), false);
+  assert.equal(isMetaSubscriptionConfirmed({ data: [{ id: "app" }] }), false);
+  assert.equal(isMetaSubscriptionConfirmed(null), false);
 });

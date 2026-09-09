@@ -5,6 +5,7 @@ import {
   readJsonWithLimit,
   requestIp,
 } from "@/lib/request-security.server";
+import { isMetaSubscriptionConfirmed } from "@/lib/meta-subscription";
 
 // Called by the public onboarding page after Meta Embedded Signup succeeds.
 // Exchanges the temporary code for a long-lived access token, stores it,
@@ -132,13 +133,13 @@ export const Route = createFileRoute("/api/public/onboarding/complete")({
               },
             );
             const subJson: any = await subRes.json().catch(() => ({}));
-            webhookSubscribed =
-              subRes.ok && (subJson.success === true || subJson.data !== undefined);
-            if (!subRes.ok) console.warn("[onboarding.complete] subscribe failed", subJson);
+            webhookSubscribed = subRes.ok && isMetaSubscriptionConfirmed(subJson);
+            if (!webhookSubscribed)
+              console.warn("[onboarding.complete] subscribe not confirmed", subJson);
           }
 
           // 5) Store account (upsert on phone_number_id)
-          // NOTE: `token_encrypted` currently stores the token as-is. Introduce
+          // The database adapter encrypts token_encrypted before persistence.
           const upsertPayload = {
             client_id: link.client_id,
             waba_id: body.waba_id ?? null,

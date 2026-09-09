@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireDatabaseAuth } from "@/integrations/database/auth-middleware";
 import { z } from "zod";
+import { isMetaSubscriptionConfirmed } from "@/lib/meta-subscription";
 
 async function assertAdmin(database: any, userId: string) {
   const { data } = await database
@@ -263,7 +264,7 @@ export const resubscribeWabaWebhook = createServerFn({ method: "POST" })
       });
       httpStatus = res.status;
       metaJson = await res.json().catch(() => ({}));
-      ok = res.ok && (metaJson?.success === true || metaJson?.data !== undefined);
+      ok = res.ok && isMetaSubscriptionConfirmed(metaJson);
     } catch (err: any) {
       networkErr = String(err?.message ?? err).slice(0, 500);
       console.error("[resubscribeWabaWebhook] network error", networkErr);
