@@ -278,7 +278,16 @@ function ClientDetail() {
       <p className="text-sm text-destructive">{(error as Error)?.message ?? "No encontrado"}</p>
     );
 
-  const wa = (data.whatsapp_accounts as any[])?.[0];
+  // A client may retain historical account rows after re-registering the same
+  // display number. Always operate on the most recently connected account,
+  // never on the arbitrary first row returned by the relation.
+  const wa = [...((data.whatsapp_accounts as any[]) ?? [])].sort((a, b) => {
+    const connectedRank = Number(b.status === "connected") - Number(a.status === "connected");
+    if (connectedRank !== 0) return connectedRank;
+    const aDate = new Date(a.connected_at ?? a.created_at ?? 0).getTime();
+    const bDate = new Date(b.connected_at ?? b.created_at ?? 0).getTime();
+    return bDate - aDate;
+  })[0];
   const activeLinks = ((data.onboarding_links as any[]) ?? [])
     .filter(
       (l) =>

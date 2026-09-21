@@ -19,7 +19,7 @@ export const listClients = createServerFn({ method: "GET" })
     const { data, error } = await context.database
       .from("clients")
       .select(
-        "id,name,email,company_name,status,n8n_enabled,created_at,whatsapp_accounts(id,status,display_phone_number,verified_name,waba_id,phone_number_id,webhook_subscribed)",
+        "id,name,email,company_name,status,n8n_enabled,created_at,whatsapp_accounts(id,status,display_phone_number,verified_name,waba_id,phone_number_id,webhook_subscribed,connected_at,created_at)",
       )
       .order("created_at", { ascending: false });
     if (error) throw new Error(error.message);

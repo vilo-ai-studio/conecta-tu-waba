@@ -64,6 +64,8 @@ type ClientRow = {
     waba_id: string | null;
     phone_number_id: string | null;
     webhook_subscribed: boolean;
+    connected_at: string | null;
+    created_at: string;
   }>;
 };
 
@@ -194,7 +196,14 @@ function Dashboard() {
               </thead>
               <tbody className="divide-y divide-border">
                 {clients.map((client) => {
-                  const wa = client.whatsapp_accounts?.[0];
+                  const wa = [...(client.whatsapp_accounts ?? [])].sort((a, b) => {
+                    const connectedRank = Number(b.status === "connected") - Number(a.status === "connected");
+                    if (connectedRank !== 0) return connectedRank;
+                    return (
+                      new Date(b.connected_at ?? b.created_at).getTime() -
+                      new Date(a.connected_at ?? a.created_at).getTime()
+                    );
+                  })[0];
                   return (
                     <tr key={client.id} className="group transition-colors hover:bg-muted/25">
                       <td className="px-5 py-4">
