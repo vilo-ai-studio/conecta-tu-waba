@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   getClient,
   createOnboardingLink,
+  revokeOnboardingLink,
   updateClientN8n,
   sendN8nTestEvent,
 } from "@/lib/admin.functions";
@@ -72,6 +73,7 @@ function ClientDetail() {
   const queryClient = useQueryClient();
   const get = useServerFn(getClient);
   const makeLink = useServerFn(createOnboardingLink);
+  const revokeLink = useServerFn(revokeOnboardingLink);
   const saveN8n = useServerFn(updateClientN8n);
   const sendTest = useServerFn(sendN8nTestEvent);
   const sendWa = useServerFn(sendTestMessage);
@@ -90,6 +92,8 @@ function ClientDetail() {
     queryFn: () => listContacts({ data: { client_id: id } }),
   });
   const [generating, setGenerating] = useState(false);
+  const [revokingLinkId, setRevokingLinkId] = useState<string | null>(null);
+  const [showLinkHistory, setShowLinkHistory] = useState(false);
   const [n8nEnabled, setN8nEnabled] = useState(false);
   const [n8nUrl, setN8nUrl] = useState("");
   const [n8nSecret, setN8nSecret] = useState("");
@@ -187,7 +191,9 @@ function ClientDetail() {
     setGenerating(true);
     try {
       await makeLink({ data: { client_id: id } });
-      toast.success("Enlace generado");
+      toast.success("Enlace generado", {
+        description: "Los enlaces anteriores sin usar se revocaron automáticamente.",
+      });
       router.invalidate();
     } catch (err: any) {
       toast.error("Error", { description: err.message });
@@ -274,9 +280,24 @@ function ClientDetail() {
 
   const wa = (data.whatsapp_accounts as any[])?.[0];
   const activeLinks = ((data.onboarding_links as any[]) ?? [])
-    .filter((l) => !l.used_at && (!l.expires_at || new Date(l.expires_at) > new Date()))
+    .filter(
+      (l) =>
+        !l.used_at &&
+        !l.revoked_at &&
+        (!l.expires_at || new Date(l.expires_at) > new Date()),
+    )
     .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  const onboardingLinks = ((data.onboarding_links as any[]) ?? []).sort(
+    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+  );
   const origin = typeof window !== "undefined" ? window.location.origin : "";
+  const formatDate = (value: string | null | undefined) =>
+    value
+      ? new Intl.DateTimeFormat("es-MX", {
+          dateStyle: "medium",
+          timeStyle: "short",
+        }).format(new Date(value))
+      : "—";
 
   return (
     <div className="space-y-6">
@@ -312,15 +333,15 @@ function ClientDetail() {
                 Enlace de conexión
               </CardTitle>
               <CardDescription>
-                Genera un enlace único para que el cliente conecte su WhatsApp Business con Meta
-                Embedded Signup.
+                Cada cliente conserva un solo enlace utilizable. Al generar uno nuevo, los
+                anteriores sin usar se revocan automáticamente.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex flex-wrap gap-2">
                 <Button onClick={generate} disabled={generating}>
                   <RefreshCw className={`mr-2 h-4 w-4 ${generating ? "animate-spin" : ""}`} />
-                  Generar enlace de conexión
+                  Generar nuevo enlace
                 </Button>
                 <Button variant="outline" asChild>
                   <a href="/onboarding" target="_blank" rel="noreferrer">
@@ -329,10 +350,19 @@ function ClientDetail() {
                 </Button>
               </div>
 
-              {activeLinks.length > 0 && (
+              {activeLinks.length > 0 ? (
                 <div className="space-y-2">
-                  <p className="text-sm font-medium">Enlaces activos</p>
-                  {activeLinks.map((l) => {
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-medium">Enlace vigente</p>
+                      <p className="text-xs text-muted-foreground">
+                        Creado {formatDate(activeLinks[0].created_at)} · vence{" "}
+                        {formatDate(activeLinks[0].expires_at)}
+                      </p>
+                    </div>
+                    <Badge variant="secondary">Más reciente</Badge>
+                  </div>
+                  {activeLinks.slice(0, 1).map((l) => {
                     const url = `${origin}/connect/${l.token}`;
                     return (
                       <div
@@ -351,9 +381,82 @@ function ClientDetail() {
                         >
                           <Copy className="h-3 w-3" />
                         </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-destructive hover:text-destructive"
+                          disabled={revokingLinkId === l.id}
+                          onClick={async () => {
+                            if (!window.confirm("¿Revocar este enlace? Dejará de funcionar de inmediato.")) {
+                              return;
+                            }
+                            setRevokingLinkId(l.id);
+                            try {
+                              await revokeLink({ data: { id: l.id } });
+                              toast.success("Enlace revocado");
+                              await queryClient.invalidateQueries({ queryKey: ["client", id] });
+                            } catch (err: any) {
+                              toast.error("No se pudo revocar el enlace", {
+                                description: err?.message ?? "Error desconocido",
+                              });
+                            } finally {
+                              setRevokingLinkId(null);
+                            }
+                          }}
+                          title="Revocar enlace"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
                       </div>
                     );
                   })}
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  No hay un enlace vigente. Genera uno cuando el cliente vaya a iniciar la conexión.
+                </p>
+              )}
+
+              {onboardingLinks.length > 0 && (
+                <div className="border-t pt-4">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="px-0 text-muted-foreground"
+                    onClick={() => setShowLinkHistory((visible) => !visible)}
+                  >
+                    {showLinkHistory ? "Ocultar" : "Ver"} historial de enlaces ({onboardingLinks.length})
+                  </Button>
+                  {showLinkHistory && (
+                    <div className="mt-3 space-y-2 text-xs">
+                      {onboardingLinks.map((link) => {
+                        const state = link.used_at
+                          ? "Usado"
+                          : link.revoked_at
+                            ? "Revocado"
+                            : link.expires_at && new Date(link.expires_at) <= new Date()
+                              ? "Vencido"
+                              : "Vigente";
+                        return (
+                          <div
+                            key={link.id}
+                            className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-muted/30 px-3 py-2"
+                          >
+                            <span>
+                              {state} · creado {formatDate(link.created_at)}
+                            </span>
+                            <span className="text-muted-foreground">
+                              {state === "Usado"
+                                ? `usado ${formatDate(link.used_at)}`
+                                : state === "Revocado"
+                                  ? `revocado ${formatDate(link.revoked_at)}`
+                                  : `vence ${formatDate(link.expires_at)}`}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               )}
             </CardContent>

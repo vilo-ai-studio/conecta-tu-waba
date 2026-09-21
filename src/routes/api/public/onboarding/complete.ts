@@ -54,7 +54,7 @@ export const Route = createFileRoute("/api/public/onboarding/complete")({
           // 1) Validate onboarding link
           const { data: link, error: linkErr } = await databaseAdmin
             .from("onboarding_links")
-            .select("id,client_id,expires_at,used_at")
+            .select("id,client_id,expires_at,used_at,revoked_at")
             .eq("token", body.token)
             .maybeSingle();
           if (linkErr || !link) {
@@ -63,6 +63,8 @@ export const Route = createFileRoute("/api/public/onboarding/complete")({
           }
           if (link.used_at)
             return Response.json({ ok: false, error: "already_used" }, { status: 410 });
+          if (link.revoked_at)
+            return Response.json({ ok: false, error: "revoked" }, { status: 410 });
           if (link.expires_at && new Date(link.expires_at) < new Date()) {
             return Response.json({ ok: false, error: "expired" }, { status: 410 });
           }

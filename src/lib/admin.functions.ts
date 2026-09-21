@@ -33,7 +33,7 @@ export const getClient = createServerFn({ method: "GET" })
     await assertAdmin(context.database, context.userId);
     const { data: client, error } = await context.database
       .from("clients")
-      .select("*, whatsapp_accounts(*), onboarding_links(id,token,expires_at,used_at,created_at)")
+      .select("*, whatsapp_accounts(*), onboarding_links(id,token,expires_at,used_at,revoked_at,created_at)")
       .eq("id", data.id)
       .maybeSingle();
     if (error) throw new Error(error.message);
@@ -99,6 +99,16 @@ export const createOnboardingLink = createServerFn({ method: "POST" })
     const hours = data.expires_in_hours ?? 72;
     const expires_at = new Date(Date.now() + hours * 3_600_000).toISOString();
     const token = makeToken();
+    // A client can only have one usable invitation at a time. Retaining older
+    // rows as revoked lets the admin audit what happened without leaving old
+    // URLs capable of connecting a different WhatsApp account.
+    const { error: revokeError } = await context.database
+      .from("onboarding_links")
+      .update({ revoked_at: new Date().toISOString() })
+      .eq("client_id", data.client_id)
+      .is("used_at", null)
+      .is("revoked_at", null);
+    if (revokeError) throw new Error(revokeError.message);
     const { data: link, error } = await context.database
       .from("onboarding_links")
       .insert({ client_id: data.client_id, token, expires_at })
@@ -106,6 +116,26 @@ export const createOnboardingLink = createServerFn({ method: "POST" })
       .single();
     if (error) throw new Error(error.message);
     return link;
+  });
+
+// Revocation is deliberate instead of a hard delete: an old URL must stop
+// working immediately, while its lifecycle remains visible for an audit.
+export const revokeOnboardingLink = createServerFn({ method: "POST" })
+  .middleware([requireDatabaseAuth])
+  .inputValidator((input: { id: string }) => z.object({ id: z.string().uuid() }).parse(input))
+  .handler(async ({ context, data }) => {
+    await assertAdmin(context.database, context.userId);
+    const { data: link, error } = await context.database
+      .from("onboarding_links")
+      .update({ revoked_at: new Date().toISOString() })
+      .eq("id", data.id)
+      .is("used_at", null)
+      .is("revoked_at", null)
+      .select("id, client_id, revoked_at")
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!link) throw new Error("El enlace ya fue usado, revocado o no existe.");
+    return { ok: true, link };
   });
 
 export const deleteClient = createServerFn({ method: "POST" })

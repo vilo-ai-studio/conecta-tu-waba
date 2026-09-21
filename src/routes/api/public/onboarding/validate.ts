@@ -31,7 +31,7 @@ export const Route = createFileRoute("/api/public/onboarding/validate")({
 
           const { data: link, error } = await databaseAdmin
             .from("onboarding_links")
-            .select("id,client_id,expires_at,used_at,clients(name,company_name)")
+            .select("id,client_id,expires_at,used_at,revoked_at,clients(name,company_name)")
             .eq("token", token)
             .maybeSingle();
 
@@ -42,6 +42,8 @@ export const Route = createFileRoute("/api/public/onboarding/validate")({
           if (!link) return Response.json({ valid: false, reason: "not_found" }, { status: 404 });
           if (link.used_at)
             return Response.json({ valid: false, reason: "already_used" }, { status: 410 });
+          if (link.revoked_at)
+            return Response.json({ valid: false, reason: "revoked" }, { status: 410 });
           if (link.expires_at && new Date(link.expires_at) < new Date()) {
             return Response.json({ valid: false, reason: "expired" }, { status: 410 });
           }
