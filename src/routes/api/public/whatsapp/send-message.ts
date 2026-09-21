@@ -146,7 +146,6 @@ export const Route = createFileRoute("/api/public/whatsapp/send-message")({
               .eq("inbound_message_id", inboundMessageId)
               .eq("success", true)
               .in("message_type", ["text", "template"])
-              .not("meta_message_id", "is", null)
               .limit(1)
               .maybeSingle();
             if (prior?.id) {
