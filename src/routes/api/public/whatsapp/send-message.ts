@@ -135,8 +135,8 @@ export const Route = createFileRoute("/api/public/whatsapp/send-message")({
           }
 
           // Dedup de respuestas: si ya se envió un reply exitoso para este
-          // inbound_message_id, no volver a enviar. No aplica a typing_indicator
-          // (es un evento efímero, no una respuesta).
+          // inbound_message_id, no volver a enviar. Un typing_indicator es un evento
+          // efímero, no una respuesta: nunca debe bloquear el texto posterior.
           const inboundMessageId = body.inbound_message_id?.trim() || null;
           if (inboundMessageId && !isTypingIndicator) {
             const { data: prior } = await databaseAdmin
@@ -145,6 +145,8 @@ export const Route = createFileRoute("/api/public/whatsapp/send-message")({
               .eq("client_id", client.id)
               .eq("inbound_message_id", inboundMessageId)
               .eq("success", true)
+              .in("message_type", ["text", "template"])
+              .not("meta_message_id", "is", null)
               .limit(1)
               .maybeSingle();
             if (prior?.id) {
@@ -295,6 +297,10 @@ export const Route = createFileRoute("/api/public/whatsapp/send-message")({
           }
 
           const metaMessageId = ok ? (metaJson?.messages?.[0]?.id ?? null) : null;
+          if (ok && !isTypingIndicator && !metaMessageId) {
+            ok = false;
+            networkErr = "Meta respondió sin message_id para un mensaje saliente.";
+          }
           const errMsg = !ok ? (metaJson?.error?.message ?? networkErr ?? "Fallo al enviar") : null;
 
           const toDigits = String(body.to ?? "").replace(/[^\d]/g, "");
