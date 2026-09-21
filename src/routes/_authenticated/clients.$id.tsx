@@ -7,7 +7,11 @@ import {
   updateClientN8n,
   sendN8nTestEvent,
 } from "@/lib/admin.functions";
-import { sendTestMessage, resubscribeWabaWebhook } from "@/lib/whatsapp.functions";
+import {
+  sendTestMessage,
+  resubscribeWabaWebhook,
+  redirectWabaWebhookToRouter,
+} from "@/lib/whatsapp.functions";
 import {
   listTestContacts,
   createTestContact,
@@ -70,6 +74,7 @@ function ClientDetail() {
   const sendTest = useServerFn(sendN8nTestEvent);
   const sendWa = useServerFn(sendTestMessage);
   const resubscribe = useServerFn(resubscribeWabaWebhook);
+  const redirectWebhook = useServerFn(redirectWabaWebhookToRouter);
   const listContacts = useServerFn(listTestContacts);
   const addContact = useServerFn(createTestContact);
   const removeContact = useServerFn(deleteTestContact);
@@ -109,6 +114,8 @@ function ClientDetail() {
   const [contactLabel, setContactLabel] = useState("");
   const [savingContact, setSavingContact] = useState(false);
   const [resubscribing, setResubscribing] = useState(false);
+  const [redirectingWebhook, setRedirectingWebhook] = useState(false);
+  const [redirectWebhookDialogOpen, setRedirectWebhookDialogOpen] = useState(false);
 
   const saveCurrentAsContact = async () => {
     const phone = waTo.replace(/[^\d]/g, "");
@@ -423,6 +430,14 @@ function ClientDetail() {
                       />
                       Re-suscribir webhook del WABA
                     </Button>
+                    <Button
+                      variant="outline"
+                      disabled={redirectingWebhook || !wa.waba_id}
+                      onClick={() => setRedirectWebhookDialogOpen(true)}
+                    >
+                      <Webhook className="mr-2 h-4 w-4" />
+                      Redirigir callback al router
+                    </Button>
                   </div>
                 </>
               ) : (
@@ -609,6 +624,65 @@ function ClientDetail() {
                 >
                   <Send className={`mr-2 h-4 w-4 ${waSending ? "animate-pulse" : ""}`} />
                   {waSending ? "Enviando…" : "Enviar"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          <Dialog open={redirectWebhookDialogOpen} onOpenChange={setRedirectWebhookDialogOpen}>
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle>Redirigir callback de WhatsApp al router</DialogTitle>
+                <DialogDescription>
+                  Este cambio reemplaza el callback alterno configurado para el WABA de este
+                  número, por ejemplo un túnel temporal de ngrok. Meta enviará los eventos de
+                  mensajes a este router.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm">
+                Se configurará la URL pública definida para este router. No modifica n8n,
+                Chatwoot ni desconecta el número.
+              </div>
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={redirectingWebhook}
+                  onClick={() => setRedirectWebhookDialogOpen(false)}
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  type="button"
+                  disabled={redirectingWebhook || !wa?.waba_id}
+                  onClick={async () => {
+                    if (!wa) return;
+                    setRedirectingWebhook(true);
+                    try {
+                      const result = await redirectWebhook({
+                        data: { whatsapp_account_id: wa.id },
+                      });
+                      if (result.ok) {
+                        toast.success("Callback redirigido al router", {
+                          description: result.callback_url,
+                        });
+                        setRedirectWebhookDialogOpen(false);
+                      } else {
+                        const issue = result.error;
+                        toast.error(
+                          `Meta: ${issue.message}${issue.code ? ` (code ${issue.code})` : ""}${issue.http_status ? ` [HTTP ${issue.http_status}]` : ""}`,
+                        );
+                      }
+                      await queryClient.invalidateQueries({ queryKey: ["client", id] });
+                    } catch (err: any) {
+                      toast.error(err?.message ?? "No se pudo redirigir el callback");
+                    } finally {
+                      setRedirectingWebhook(false);
+                    }
+                  }}
+                >
+                  <Webhook className={`mr-2 h-4 w-4 ${redirectingWebhook ? "animate-pulse" : ""}`} />
+                  {redirectingWebhook ? "Redirigiendo…" : "Confirmar redirección"}
                 </Button>
               </DialogFooter>
             </DialogContent>

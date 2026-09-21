@@ -312,3 +312,129 @@ export const resubscribeWabaWebhook = createServerFn({ method: "POST" })
     }
     return { ok: true, webhook_subscribed: true, response: metaJson };
   });
+
+// Cambia el callback alterno de un WABA hacia este router. Meta conserva este
+// override aunque cambie el callback general de la aplicación, por lo que esta
+// acción es necesaria para sustituir, por ejemplo, un túnel temporal de ngrok.
+// El token de verificación nunca se expone al navegador.
+export const redirectWabaWebhookToRouter = createServerFn({ method: "POST" })
+  .middleware([requireDatabaseAuth])
+  .inputValidator((input: { whatsapp_account_id: string }) =>
+    z.object({ whatsapp_account_id: z.string().uuid() }).parse(input),
+  )
+  .handler(async ({ context, data }) => {
+    await assertAdmin(context.database, context.userId);
+    const { databaseAdmin } = await import("@/integrations/database/client.server");
+
+    const { data: acct, error: acctErr } = await databaseAdmin
+      .from("whatsapp_accounts")
+      .select("id, client_id, waba_id, phone_number_id, token_encrypted")
+      .eq("id", data.whatsapp_account_id)
+      .maybeSingle();
+    if (acctErr) throw new Error(acctErr.message);
+    if (!acct) return { ok: false, error: { message: "Cuenta no encontrada", type: "not_found" } };
+    if (!acct.waba_id)
+      return { ok: false, error: { message: "La cuenta no tiene WABA ID", type: "missing_waba_id" } };
+    if (!acct.token_encrypted)
+      return { ok: false, error: { message: "La cuenta no tiene token guardado", type: "missing_token" } };
+
+    const verifyToken = process.env.WHATSAPP_VERIFY_TOKEN;
+    const appUrl = process.env.APP_URL?.replace(/\/$/, "");
+    if (!verifyToken)
+      return {
+        ok: false,
+        error: { message: "Falta WHATSAPP_VERIFY_TOKEN en el servidor", type: "missing_verify_token" },
+      };
+    if (!appUrl)
+      return { ok: false, error: { message: "Falta APP_URL en el servidor", type: "missing_app_url" } };
+
+    let callbackUrl: string;
+    try {
+      const parsed = new URL(appUrl);
+      if (parsed.protocol !== "https:") throw new Error("APP_URL debe usar HTTPS");
+      callbackUrl = `${parsed.toString().replace(/\/$/, "")}/api/public/whatsapp/webhook`;
+    } catch (error: any) {
+      return {
+        ok: false,
+        error: { message: error?.message ?? "APP_URL inválida", type: "invalid_app_url" },
+      };
+    }
+
+    const version = process.env.META_GRAPH_API_VERSION ?? "v25.0";
+    const url = `https://graph.facebook.com/${version}/${acct.waba_id}/subscribed_apps`;
+    let httpStatus = 0;
+    let metaJson: any = null;
+    let networkErr: string | null = null;
+
+    try {
+      // Meta exige que la app esté suscrita al WABA antes de permitir un override.
+      const subscribeResponse = await fetch(url, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${acct.token_encrypted}` },
+        signal: AbortSignal.timeout(Number(process.env.META_TIMEOUT_MS ?? 15_000)),
+      });
+      const subscribeJson = await subscribeResponse.json().catch(() => ({}));
+      if (!subscribeResponse.ok || !isMetaSubscriptionConfirmed(subscribeJson)) {
+        httpStatus = subscribeResponse.status;
+        metaJson = subscribeJson;
+        throw new Error(subscribeJson?.error?.message ?? `HTTP ${subscribeResponse.status}`);
+      }
+
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${acct.token_encrypted}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ override_callback_uri: callbackUrl, verify_token: verifyToken }),
+        signal: AbortSignal.timeout(Number(process.env.META_TIMEOUT_MS ?? 15_000)),
+      });
+      httpStatus = response.status;
+      metaJson = await response.json().catch(() => ({}));
+    } catch (error: any) {
+      networkErr = String(error?.message ?? error).slice(0, 500);
+      console.error("[redirectWabaWebhookToRouter] request error", networkErr);
+    }
+
+    const ok = httpStatus >= 200 && httpStatus < 300 && isMetaSubscriptionConfirmed(metaJson);
+    const errorMessage = !ok
+      ? (metaJson?.error?.message ?? networkErr ?? `HTTP ${httpStatus}`)
+      : null;
+
+    await databaseAdmin.from("meta_webhook_events").insert({
+      client_id: acct.client_id,
+      whatsapp_account_id: acct.id,
+      phone_number_id: acct.phone_number_id,
+      direction: "admin",
+      event_kind: "redirect_waba_webhook_to_router",
+      processed: ok,
+      processing_error: errorMessage,
+      raw_payload: {
+        request: { url, method: "POST", waba_id: acct.waba_id, override_callback_uri: callbackUrl },
+        response: { http_status: httpStatus, body: metaJson, network_error: networkErr },
+      },
+      error_code: metaJson?.error?.code != null ? String(metaJson.error.code) : null,
+      error_title: metaJson?.error?.type ?? (networkErr ? "network_error" : null),
+      error_message: errorMessage,
+      error_details: metaJson?.error ?? null,
+    } as any);
+
+    if (ok) {
+      await databaseAdmin
+        .from("whatsapp_accounts")
+        .update({ webhook_subscribed: true })
+        .eq("id", acct.id);
+      return { ok: true, webhook_subscribed: true, callback_url: callbackUrl };
+    }
+
+    return {
+      ok: false,
+      error: {
+        message: errorMessage ?? "No se pudo cambiar el callback",
+        type: metaJson?.error?.type ?? (networkErr ? "network_error" : "meta_error"),
+        code: metaJson?.error?.code ?? null,
+        http_status: httpStatus || null,
+        fbtrace_id: metaJson?.error?.fbtrace_id ?? null,
+      },
+    };
+  });
