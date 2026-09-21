@@ -6,10 +6,11 @@ import {
   requestIp,
 } from "@/lib/request-security.server";
 import { isMetaSubscriptionConfirmed } from "@/lib/meta-subscription";
+import { getMetaSystemUserToken } from "@/lib/meta-system-user.server";
 
 // Called by the public onboarding page after Meta Embedded Signup succeeds.
-// Exchanges the temporary code for a long-lived access token, stores it,
-// fetches the phone-number details, and subscribes the app to the WABA webhook.
+// Exchanges the temporary code only to validate the result, then fetches the
+// phone-number details and subscribes using Búho's Meta System User.
 //
 // Body: { token: string, code: string, waba_id?: string, phone_number_id?: string, business_id?: string }
 // The `token` field is the ONBOARDING token (identifies the client). It is
@@ -80,8 +81,9 @@ export const Route = createFileRoute("/api/public/onboarding/complete")({
             .update({ status: "in_progress" })
             .eq("id", link.client_id);
 
-          // 2) Exchange code -> access_token
-          // TODO Meta: confirm exact endpoint/params for Embedded Signup (Tech Provider / Coexistence flow).
+          // 2) Exchange code to validate/consume the Embedded Signup result.
+          // This OAuth credential is intentionally NOT persisted nor used for
+          // operations. Meta calls below use the provider System User token.
           const tokenUrl = new URL(`https://graph.facebook.com/${version}/oauth/access_token`);
           tokenUrl.searchParams.set("client_id", appId);
           tokenUrl.searchParams.set("client_secret", appSecret);
@@ -104,7 +106,17 @@ export const Route = createFileRoute("/api/public/onboarding/complete")({
               { status: 502 },
             );
           }
-          const accessToken: string = tokenJson.access_token;
+          let systemUserToken: string;
+          try {
+            systemUserToken = getMetaSystemUserToken();
+          } catch (error) {
+            console.error("[onboarding.complete] system token missing", error);
+            await databaseAdmin
+              .from("clients")
+              .update({ status: "onboarding_error" })
+              .eq("id", link.client_id);
+            return Response.json({ ok: false, error: "system_user_token_not_configured" }, { status: 503 });
+          }
 
           // 3) Fetch phone number details (if we have phone_number_id)
           let phoneDetails: any = null;
@@ -112,13 +124,22 @@ export const Route = createFileRoute("/api/public/onboarding/complete")({
             const phoneRes = await fetch(
               `https://graph.facebook.com/${version}/${body.phone_number_id}?fields=display_phone_number,verified_name,id`,
               {
-                headers: { Authorization: `Bearer ${accessToken}` },
+                headers: { Authorization: `Bearer ${systemUserToken}` },
                 signal: AbortSignal.timeout(Number(process.env.META_TIMEOUT_MS ?? 15_000)),
               },
             );
             phoneDetails = await phoneRes.json();
-            if (!phoneRes.ok)
+            if (!phoneRes.ok) {
               console.warn("[onboarding.complete] phone lookup failed", phoneDetails);
+              await databaseAdmin
+                .from("clients")
+                .update({ status: "onboarding_error" })
+                .eq("id", link.client_id);
+              return Response.json(
+                { ok: false, error: "system_user_asset_access_failed", detail: phoneDetails?.error ?? null },
+                { status: 403 },
+              );
+            }
           }
 
           // 4) Subscribe app to WABA
@@ -128,18 +149,28 @@ export const Route = createFileRoute("/api/public/onboarding/complete")({
               `https://graph.facebook.com/${version}/${body.waba_id}/subscribed_apps`,
               {
                 method: "POST",
-                headers: { Authorization: `Bearer ${accessToken}` },
+                headers: { Authorization: `Bearer ${systemUserToken}` },
                 signal: AbortSignal.timeout(Number(process.env.META_TIMEOUT_MS ?? 15_000)),
               },
             );
             const subJson: any = await subRes.json().catch(() => ({}));
             webhookSubscribed = subRes.ok && isMetaSubscriptionConfirmed(subJson);
-            if (!webhookSubscribed)
+            if (!webhookSubscribed) {
               console.warn("[onboarding.complete] subscribe not confirmed", subJson);
+              await databaseAdmin
+                .from("clients")
+                .update({ status: "onboarding_error" })
+                .eq("id", link.client_id);
+              return Response.json(
+                { ok: false, error: "system_user_waba_access_failed", detail: subJson?.error ?? null },
+                { status: 403 },
+              );
+            }
           }
 
           // 5) Store account (upsert on phone_number_id)
-          // The database adapter encrypts token_encrypted before persistence.
+          // Do not persist per-client OAuth access tokens. All operational calls
+          // use META_SYSTEM_USER_ACCESS_TOKEN from the VPS environment.
           const upsertPayload = {
             client_id: link.client_id,
             waba_id: body.waba_id ?? null,
@@ -149,7 +180,7 @@ export const Route = createFileRoute("/api/public/onboarding/complete")({
             verified_name: phoneDetails?.verified_name ?? null,
             status: "connected",
             webhook_subscribed: webhookSubscribed,
-            token_encrypted: accessToken,
+            token_encrypted: null,
             connected_at: new Date().toISOString(),
           };
 

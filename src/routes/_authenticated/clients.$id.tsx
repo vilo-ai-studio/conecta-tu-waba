@@ -11,6 +11,7 @@ import {
   sendTestMessage,
   resubscribeWabaWebhook,
   redirectWabaWebhookToRouter,
+  verifyWhatsAppAccountMetaAccess,
 } from "@/lib/whatsapp.functions";
 import {
   listTestContacts,
@@ -46,6 +47,7 @@ import {
   ScrollText,
   MessageSquare,
   Webhook,
+  ShieldCheck,
   Bug,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -75,6 +77,7 @@ function ClientDetail() {
   const sendWa = useServerFn(sendTestMessage);
   const resubscribe = useServerFn(resubscribeWabaWebhook);
   const redirectWebhook = useServerFn(redirectWabaWebhookToRouter);
+  const verifyMetaAccess = useServerFn(verifyWhatsAppAccountMetaAccess);
   const listContacts = useServerFn(listTestContacts);
   const addContact = useServerFn(createTestContact);
   const removeContact = useServerFn(deleteTestContact);
@@ -116,6 +119,7 @@ function ClientDetail() {
   const [resubscribing, setResubscribing] = useState(false);
   const [redirectingWebhook, setRedirectingWebhook] = useState(false);
   const [redirectWebhookDialogOpen, setRedirectWebhookDialogOpen] = useState(false);
+  const [verifyingMetaAccess, setVerifyingMetaAccess] = useState(false);
 
   const saveCurrentAsContact = async () => {
     const phone = waTo.replace(/[^\d]/g, "");
@@ -393,6 +397,38 @@ function ClientDetail() {
                   </dl>
                   <div className="pt-2 flex flex-wrap gap-2">
                     <Button
+                      variant="outline"
+                      disabled={verifyingMetaAccess || !wa.phone_number_id}
+                      onClick={async () => {
+                        setVerifyingMetaAccess(true);
+                        try {
+                          const res: any = await verifyMetaAccess({
+                            data: { whatsapp_account_id: wa.id },
+                          });
+                          if (res.ok) {
+                            toast.success("Acceso de Meta verificado", {
+                              description: "El System User puede administrar este número.",
+                            });
+                          } else {
+                            toast.error("No se pudo verificar el acceso de Meta", {
+                              description: res.error?.message ?? "Error desconocido",
+                            });
+                          }
+                        } catch (err: any) {
+                          toast.error("No se pudo verificar el acceso de Meta", {
+                            description: err?.message ?? "Error desconocido",
+                          });
+                        } finally {
+                          setVerifyingMetaAccess(false);
+                        }
+                      }}
+                    >
+                      <ShieldCheck
+                        className={`mr-2 h-4 w-4 ${verifyingMetaAccess ? "animate-pulse" : ""}`}
+                      />
+                      Verificar acceso Meta
+                    </Button>
+                    <Button
                       onClick={() => {
                         setWaResult(null);
                         setWaDialogOpen(true);
@@ -453,8 +489,8 @@ function ClientDetail() {
               <DialogHeader>
                 <DialogTitle>Enviar mensaje de prueba</DialogTitle>
                 <DialogDescription>
-                  Envía un mensaje real vía Meta Cloud API usando las credenciales conectadas del
-                  cliente.
+                  Envía un mensaje real vía Meta Cloud API usando la credencial protegida del
+                  System User de Búho.
                 </DialogDescription>
               </DialogHeader>
 

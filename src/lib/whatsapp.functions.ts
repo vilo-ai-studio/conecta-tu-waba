@@ -2,6 +2,11 @@ import { createServerFn } from "@tanstack/react-start";
 import { requireDatabaseAuth } from "@/integrations/database/auth-middleware";
 import { z } from "zod";
 import { isMetaSubscriptionConfirmed } from "@/lib/meta-subscription";
+import {
+  getMetaSystemUserToken,
+  metaAuthFailureMessage,
+  MetaSystemUserTokenMissingError,
+} from "@/lib/meta-system-user.server";
 
 async function assertAdmin(database: any, userId: string) {
   const { data } = await database
@@ -17,9 +22,9 @@ function normalizePhone(raw: string): string {
   return raw.replace(/[^\d]/g, "");
 }
 
-// Envía un mensaje de prueba de WhatsApp para un cliente dado, usando su cuenta
-// conectada. El access token nunca sale del backend. Registra el intento en
-// message_send_logs.
+// Envía un mensaje de prueba de WhatsApp para un cliente dado usando el System
+// User de Búho. El token nunca sale del backend y no depende de OAuth temporal
+// del cliente.
 export const sendTestMessage = createServerFn({ method: "POST" })
   .middleware([requireDatabaseAuth])
   .inputValidator((input: { client_id: string; to: string; message: string; type?: string }) =>
@@ -58,14 +63,14 @@ export const sendTestMessage = createServerFn({ method: "POST" })
 
     const { data: acct } = await databaseAdmin
       .from("whatsapp_accounts")
-      .select("id, phone_number_id, token_encrypted, status")
+      .select("id, phone_number_id, status")
       .eq("client_id", client.id)
       .eq("status", "connected")
       .order("connected_at", { ascending: false })
       .limit(1)
       .maybeSingle();
 
-    if (!acct || !acct.phone_number_id || !acct.token_encrypted) {
+    if (!acct || !acct.phone_number_id) {
       const errMsg =
         "El cliente no tiene una cuenta de WhatsApp conectada con credenciales válidas.";
       await databaseAdmin.from("message_send_logs").insert({
@@ -78,6 +83,26 @@ export const sendTestMessage = createServerFn({ method: "POST" })
         raw_response: null,
       });
       return { ok: false, error: { message: errMsg, type: "no_connected_account" } };
+    }
+
+    let systemUserToken: string;
+    try {
+      systemUserToken = getMetaSystemUserToken();
+    } catch (error) {
+      const errMsg =
+        error instanceof MetaSystemUserTokenMissingError
+          ? error.message
+          : "No se pudo cargar la credencial del System User de Meta.";
+      await databaseAdmin.from("message_send_logs").insert({
+        client_id: client.id,
+        phone_number_id: acct.phone_number_id,
+        to,
+        message_preview: data.message.slice(0, 200),
+        status: "error",
+        error_message: errMsg,
+        raw_response: null,
+      });
+      return { ok: false, error: { message: errMsg, type: "meta_system_token_missing" } };
     }
 
     const version = process.env.META_GRAPH_API_VERSION ?? "v25.0";
@@ -98,7 +123,7 @@ export const sendTestMessage = createServerFn({ method: "POST" })
       const res = await fetch(url, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${acct.token_encrypted}`,
+          Authorization: `Bearer ${systemUserToken}`,
           "content-type": "application/json",
         },
         body: JSON.stringify(metaBody),
@@ -115,7 +140,11 @@ export const sendTestMessage = createServerFn({ method: "POST" })
     const metaMessageId = ok ? (metaJson?.messages?.[0]?.id ?? null) : null;
     const metaError = !ok
       ? {
-          message: metaJson?.error?.message ?? networkErr ?? "Fallo al enviar",
+          message:
+            metaAuthFailureMessage(httpStatus, metaJson) ??
+            metaJson?.error?.message ??
+            networkErr ??
+            "Fallo al enviar",
           type: metaJson?.error?.type ?? (networkErr ? "network_error" : "meta_error"),
           code: metaJson?.error?.code ?? null,
           error_subcode: metaJson?.error?.error_subcode ?? null,
@@ -185,11 +214,11 @@ export const sendWhatsAppMessage = createServerFn({ method: "POST" })
     const { databaseAdmin } = await import("@/integrations/database/client.server");
     const { data: acct } = await databaseAdmin
       .from("whatsapp_accounts")
-      .select("phone_number_id, token_encrypted")
+      .select("phone_number_id")
       .eq("id", data.whatsapp_account_id)
       .maybeSingle();
-    if (!acct?.phone_number_id || !acct?.token_encrypted)
-      throw new Error("Cuenta sin credenciales");
+    if (!acct?.phone_number_id) throw new Error("Cuenta sin número conectado");
+    const systemUserToken = getMetaSystemUserToken();
     const version = process.env.META_GRAPH_API_VERSION ?? "v25.0";
     const to = data.to.replace(/[^\d]/g, "");
     const res = await fetch(
@@ -197,7 +226,7 @@ export const sendWhatsAppMessage = createServerFn({ method: "POST" })
       {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${acct.token_encrypted}`,
+          Authorization: `Bearer ${systemUserToken}`,
           "content-type": "application/json",
         },
         body: JSON.stringify({
@@ -216,7 +245,7 @@ export const sendWhatsAppMessage = createServerFn({ method: "POST" })
 
 // Re-suscribe la app de Meta al WABA del cliente. Útil cuando el webhook_subscribed
 // aparece en falso o Meta perdió la suscripción. Llama a
-// POST /{waba_id}/subscribed_apps con el access token guardado del cliente y
+// POST /{waba_id}/subscribed_apps con la credencial del System User y
 // actualiza whatsapp_accounts.webhook_subscribed según la respuesta.
 export const resubscribeWabaWebhook = createServerFn({ method: "POST" })
   .middleware([requireDatabaseAuth])
@@ -229,7 +258,7 @@ export const resubscribeWabaWebhook = createServerFn({ method: "POST" })
 
     const { data: acct, error: acctErr } = await databaseAdmin
       .from("whatsapp_accounts")
-      .select("id, client_id, waba_id, phone_number_id, token_encrypted")
+      .select("id, client_id, waba_id, phone_number_id")
       .eq("id", data.whatsapp_account_id)
       .maybeSingle();
     if (acctErr) throw new Error(acctErr.message);
@@ -239,11 +268,21 @@ export const resubscribeWabaWebhook = createServerFn({ method: "POST" })
         ok: false,
         error: { message: "La cuenta no tiene WABA ID", type: "missing_waba_id" },
       };
-    if (!acct.token_encrypted)
+    let systemUserToken: string;
+    try {
+      systemUserToken = getMetaSystemUserToken();
+    } catch (error) {
       return {
         ok: false,
-        error: { message: "La cuenta no tiene token guardado", type: "missing_token" },
+        error: {
+          message:
+            error instanceof Error
+              ? error.message
+              : "Falta la credencial del System User de Meta.",
+          type: "meta_system_token_missing",
+        },
       };
+    }
 
     const version = process.env.META_GRAPH_API_VERSION ?? "v25.0";
     const url = `https://graph.facebook.com/${version}/${acct.waba_id}/subscribed_apps`;
@@ -257,7 +296,7 @@ export const resubscribeWabaWebhook = createServerFn({ method: "POST" })
       const res = await fetch(url, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${acct.token_encrypted}`,
+          Authorization: `Bearer ${systemUserToken}`,
           "content-type": "application/json",
         },
         signal: AbortSignal.timeout(Number(process.env.META_TIMEOUT_MS ?? 15_000)),
@@ -271,7 +310,7 @@ export const resubscribeWabaWebhook = createServerFn({ method: "POST" })
     }
 
     const errorMessage = !ok
-      ? (metaJson?.error?.message ?? networkErr ?? `HTTP ${httpStatus}`)
+      ? (metaAuthFailureMessage(httpStatus, metaJson) ?? metaJson?.error?.message ?? networkErr ?? `HTTP ${httpStatus}`)
       : null;
 
     // Log the request/response for auditing.
@@ -328,15 +367,28 @@ export const redirectWabaWebhookToRouter = createServerFn({ method: "POST" })
 
     const { data: acct, error: acctErr } = await databaseAdmin
       .from("whatsapp_accounts")
-      .select("id, client_id, waba_id, phone_number_id, token_encrypted")
+      .select("id, client_id, waba_id, phone_number_id")
       .eq("id", data.whatsapp_account_id)
       .maybeSingle();
     if (acctErr) throw new Error(acctErr.message);
     if (!acct) return { ok: false, error: { message: "Cuenta no encontrada", type: "not_found" } };
     if (!acct.waba_id)
       return { ok: false, error: { message: "La cuenta no tiene WABA ID", type: "missing_waba_id" } };
-    if (!acct.token_encrypted)
-      return { ok: false, error: { message: "La cuenta no tiene token guardado", type: "missing_token" } };
+    let systemUserToken: string;
+    try {
+      systemUserToken = getMetaSystemUserToken();
+    } catch (error) {
+      return {
+        ok: false,
+        error: {
+          message:
+            error instanceof Error
+              ? error.message
+              : "Falta la credencial del System User de Meta.",
+          type: "meta_system_token_missing",
+        },
+      };
+    }
 
     const verifyToken = process.env.WHATSAPP_VERIFY_TOKEN;
     const appUrl = process.env.APP_URL?.replace(/\/$/, "");
@@ -370,7 +422,7 @@ export const redirectWabaWebhookToRouter = createServerFn({ method: "POST" })
       // Meta exige que la app esté suscrita al WABA antes de permitir un override.
       const subscribeResponse = await fetch(url, {
         method: "POST",
-        headers: { Authorization: `Bearer ${acct.token_encrypted}` },
+        headers: { Authorization: `Bearer ${systemUserToken}` },
         signal: AbortSignal.timeout(Number(process.env.META_TIMEOUT_MS ?? 15_000)),
       });
       const subscribeJson = await subscribeResponse.json().catch(() => ({}));
@@ -383,7 +435,7 @@ export const redirectWabaWebhookToRouter = createServerFn({ method: "POST" })
       const response = await fetch(url, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${acct.token_encrypted}`,
+          Authorization: `Bearer ${systemUserToken}`,
           "content-type": "application/json",
         },
         body: JSON.stringify({ override_callback_uri: callbackUrl, verify_token: verifyToken }),
@@ -398,7 +450,7 @@ export const redirectWabaWebhookToRouter = createServerFn({ method: "POST" })
 
     const ok = httpStatus >= 200 && httpStatus < 300 && isMetaSubscriptionConfirmed(metaJson);
     const errorMessage = !ok
-      ? (metaJson?.error?.message ?? networkErr ?? `HTTP ${httpStatus}`)
+      ? (metaAuthFailureMessage(httpStatus, metaJson) ?? metaJson?.error?.message ?? networkErr ?? `HTTP ${httpStatus}`)
       : null;
 
     await databaseAdmin.from("meta_webhook_events").insert({
@@ -437,4 +489,94 @@ export const redirectWabaWebhookToRouter = createServerFn({ method: "POST" })
         fbtrace_id: metaJson?.error?.fbtrace_id ?? null,
       },
     };
+  });
+
+// Comprueba que el System User de Búho puede administrar el número conectado.
+// No reautentica ni rota tokens: Meta exige esa acción por un administrador.
+export const verifyWhatsAppAccountMetaAccess = createServerFn({ method: "POST" })
+  .middleware([requireDatabaseAuth])
+  .inputValidator((input: { whatsapp_account_id: string }) =>
+    z.object({ whatsapp_account_id: z.string().uuid() }).parse(input),
+  )
+  .handler(async ({ context, data }) => {
+    await assertAdmin(context.database, context.userId);
+    const { databaseAdmin } = await import("@/integrations/database/client.server");
+    const { data: acct, error: accountError } = await databaseAdmin
+      .from("whatsapp_accounts")
+      .select("id, client_id, phone_number_id")
+      .eq("id", data.whatsapp_account_id)
+      .maybeSingle();
+    if (accountError) throw new Error(accountError.message);
+    if (!acct?.phone_number_id) {
+      return {
+        ok: false,
+        error: { message: "La cuenta no tiene un Phone Number ID conectado.", type: "missing_phone_number_id" },
+      };
+    }
+
+    let systemUserToken: string;
+    try {
+      systemUserToken = getMetaSystemUserToken();
+    } catch (error) {
+      return {
+        ok: false,
+        error: {
+          message:
+            error instanceof Error
+              ? error.message
+              : "Falta la credencial del System User de Meta.",
+          type: "meta_system_token_missing",
+        },
+      };
+    }
+
+    const version = process.env.META_GRAPH_API_VERSION ?? "v25.0";
+    const url = `https://graph.facebook.com/${version}/${acct.phone_number_id}?fields=id,display_phone_number,verified_name`;
+    let httpStatus = 0;
+    let response: any = null;
+    let networkError: string | null = null;
+    try {
+      const result = await fetch(url, {
+        headers: { Authorization: `Bearer ${systemUserToken}` },
+        signal: AbortSignal.timeout(Number(process.env.META_TIMEOUT_MS ?? 15_000)),
+      });
+      httpStatus = result.status;
+      response = await result.json().catch(() => ({}));
+    } catch (error: any) {
+      networkError = String(error?.message ?? error).slice(0, 500);
+    }
+
+    const ok = httpStatus >= 200 && httpStatus < 300;
+    const errorMessage = ok
+      ? null
+      : metaAuthFailureMessage(httpStatus, response) ?? response?.error?.message ?? networkError ?? `HTTP ${httpStatus}`;
+    await databaseAdmin.from("meta_webhook_events").insert({
+      client_id: acct.client_id,
+      whatsapp_account_id: acct.id,
+      phone_number_id: acct.phone_number_id,
+      direction: "admin",
+      event_kind: "verify_meta_system_user_access",
+      processed: ok,
+      processing_error: errorMessage,
+      raw_payload: {
+        request: { method: "GET", phone_number_id: acct.phone_number_id },
+        response: { http_status: httpStatus, body: response, network_error: networkError },
+      },
+      error_code: response?.error?.code != null ? String(response.error.code) : null,
+      error_title: response?.error?.type ?? (networkError ? "network_error" : null),
+      error_message: errorMessage,
+      error_details: response?.error ?? null,
+    } as any);
+
+    return ok
+      ? { ok: true, account: response }
+      : {
+          ok: false,
+          error: {
+            message: errorMessage ?? "No se pudo validar el acceso de Meta.",
+            type: response?.error?.type ?? (networkError ? "network_error" : "meta_error"),
+            code: response?.error?.code ?? null,
+            http_status: httpStatus || null,
+          },
+        };
   });

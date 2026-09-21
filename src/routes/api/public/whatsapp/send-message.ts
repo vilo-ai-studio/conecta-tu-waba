@@ -7,6 +7,7 @@ import {
   enforceTokenBucket,
   readJsonWithLimit,
 } from "@/lib/request-security.server";
+import { getMetaSystemUserToken, MetaSystemUserTokenMissingError } from "@/lib/meta-system-user.server";
 
 // Endpoint público llamado por instancias n8n para enviar mensajes de WhatsApp
 // a través de Meta Cloud API. n8n NUNCA recibe el access token real; solo envía
@@ -114,14 +115,23 @@ export const Route = createFileRoute("/api/public/whatsapp/send-message")({
           // 2) Cuenta WhatsApp conectada del cliente
           const { data: acct, error: aErr } = await databaseAdmin
             .from("whatsapp_accounts")
-            .select("id, phone_number_id, token_encrypted, status")
+            .select("id, phone_number_id, status")
             .eq("client_id", client.id)
             .eq("status", "connected")
             .order("connected_at", { ascending: false })
             .limit(1)
             .maybeSingle();
-          if (aErr || !acct || !acct.phone_number_id || !acct.token_encrypted) {
+          if (aErr || !acct || !acct.phone_number_id) {
             return Response.json({ ok: false, error: "no_connected_account" }, { status: 409 });
+          }
+          let systemUserToken: string;
+          try {
+            systemUserToken = getMetaSystemUserToken();
+          } catch (error) {
+            if (error instanceof MetaSystemUserTokenMissingError) {
+              return Response.json({ ok: false, error: "meta_system_user_token_not_configured" }, { status: 503 });
+            }
+            throw error;
           }
 
           // Dedup de respuestas: si ya se envió un reply exitoso para este
@@ -271,7 +281,7 @@ export const Route = createFileRoute("/api/public/whatsapp/send-message")({
               method: "POST",
               headers: {
                 "content-type": "application/json",
-                authorization: `Bearer ${acct.token_encrypted}`,
+                authorization: `Bearer ${systemUserToken}`,
               },
               body: JSON.stringify(metaBody),
               signal: AbortSignal.timeout(Number(process.env.META_TIMEOUT_MS ?? 15_000)),

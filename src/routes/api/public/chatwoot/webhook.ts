@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { createHmac, timingSafeEqual } from "crypto";
+import { getMetaSystemUserToken, MetaSystemUserTokenMissingError } from "@/lib/meta-system-user.server";
 
 // Chatwoot webhook.
 //
@@ -334,18 +335,29 @@ export const Route = createFileRoute("/api/public/chatwoot/webhook")({
 
         const { data: acct } = await databaseAdmin
           .from("whatsapp_accounts")
-          .select("id, phone_number_id, token_encrypted, status")
+          .select("id, phone_number_id, status")
           .eq("client_id", cfg.client_id)
           .eq("status", "connected")
           .order("connected_at", { ascending: false })
           .limit(1)
           .maybeSingle();
-        if (!acct?.phone_number_id || !acct.token_encrypted) {
+        if (!acct?.phone_number_id) {
           await logChatwootEvent(cfg.client_id, "webhook_no_meta_account", "outgoing", "error", {
             chatwoot_message_id: chatwootMessageId,
             chatwoot_conversation_id: conversationId,
           });
           return Response.json({ ok: true, ignored: "no_meta_account" });
+        }
+        let systemUserToken: string;
+        try {
+          systemUserToken = getMetaSystemUserToken();
+        } catch (error) {
+          await logChatwootEvent(cfg.client_id, "meta_system_token_missing", "outgoing", "error", {
+            chatwoot_message_id: chatwootMessageId,
+            chatwoot_conversation_id: conversationId,
+          });
+          if (!(error instanceof MetaSystemUserTokenMissingError)) console.error(error);
+          return Response.json({ ok: true, ignored: "meta_system_user_token_not_configured" });
         }
 
         const version = process.env.META_GRAPH_API_VERSION ?? "v25.0";
@@ -366,7 +378,7 @@ export const Route = createFileRoute("/api/public/chatwoot/webhook")({
             method: "POST",
             headers: {
               "content-type": "application/json",
-              authorization: `Bearer ${acct.token_encrypted}`,
+              authorization: `Bearer ${systemUserToken}`,
             },
             body: JSON.stringify(metaBody),
             signal: AbortSignal.timeout(Number(process.env.META_TIMEOUT_MS ?? 15_000)),

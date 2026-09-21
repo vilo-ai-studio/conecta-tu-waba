@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   Clock3,
   Database,
+  KeyRound,
   RefreshCw,
   Server,
 } from "lucide-react";
@@ -66,6 +67,11 @@ function OperationsPage() {
     { label: "PostgreSQL", value: state?.postgres, icon: Database },
     { label: "Redis", value: state?.redis, icon: Activity },
     { label: "Worker", value: state?.worker, icon: RefreshCw },
+    {
+      label: "Credencial Meta",
+      value: state?.meta.system_user_token_configured ? "ok" : "error",
+      icon: KeyRound,
+    },
   ];
 
   return (

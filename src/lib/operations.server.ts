@@ -5,6 +5,7 @@ import {
   republishStoredJob,
   WORKER_HEARTBEAT_KEY,
 } from "@/lib/queue.server";
+import { isMetaSystemUserTokenConfigured } from "@/lib/meta-system-user.server";
 
 export async function assertOperationsAdmin(userId: string): Promise<void> {
   const result = await getPool().query(
@@ -66,6 +67,7 @@ export async function buildOperationsHealth() {
     meta: {
       app_id_configured: Boolean(process.env.META_APP_ID ?? process.env.VITE_META_APP_ID),
       app_secret_configured: Boolean(process.env.META_APP_SECRET),
+      system_user_token_configured: isMetaSystemUserTokenConfigured(),
       signature_required: (process.env.META_WEBHOOK_SIGNATURE_REQUIRED ?? "true") === "true",
     },
   };
