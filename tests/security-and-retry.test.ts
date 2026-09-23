@@ -13,6 +13,7 @@ import {
   retryDelayMs,
 } from "../src/lib/retry-policy";
 import { isMetaSubscriptionConfirmed } from "../src/lib/meta-subscription";
+import { OutboundMediaError, validateOutboundMediaUrl } from "../src/lib/outbound-media.server";
 
 test("firma Meta válida, inválida, ausente y malformada", () => {
   process.env.META_APP_SECRET = "test-secret";
@@ -65,4 +66,16 @@ test("la suscripción de Meta requiere confirmación explícita", () => {
   assert.equal(isMetaSubscriptionConfirmed({ data: [] }), false);
   assert.equal(isMetaSubscriptionConfirmed({ data: [{ id: "app" }] }), false);
   assert.equal(isMetaSubscriptionConfirmed(null), false);
+});
+
+test("media saliente exige URL HTTPS pública y rechaza redes internas", async () => {
+  await assert.rejects(
+    () => validateOutboundMediaUrl("http://example.com/archivo.pdf"),
+    (error: unknown) => error instanceof OutboundMediaError && error.code === "invalid_media_url",
+  );
+  await assert.rejects(
+    () => validateOutboundMediaUrl("https://127.0.0.1/archivo.pdf"),
+    (error: unknown) =>
+      error instanceof OutboundMediaError && error.code === "media_url_not_allowed",
+  );
 });

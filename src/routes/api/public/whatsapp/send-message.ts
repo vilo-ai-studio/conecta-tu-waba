@@ -7,7 +7,15 @@ import {
   enforceTokenBucket,
   readJsonWithLimit,
 } from "@/lib/request-security.server";
-import { getMetaSystemUserToken, MetaSystemUserTokenMissingError } from "@/lib/meta-system-user.server";
+import {
+  getMetaSystemUserToken,
+  MetaSystemUserTokenMissingError,
+} from "@/lib/meta-system-user.server";
+import {
+  OutboundMediaError,
+  type OutboundMediaInput,
+  uploadOutboundMedia,
+} from "@/lib/outbound-media.server";
 
 // Endpoint público llamado por instancias n8n para enviar mensajes de WhatsApp
 // a través de Meta Cloud API. n8n NUNCA recibe el access token real; solo envía
@@ -25,7 +33,8 @@ import { getMetaSystemUserToken, MetaSystemUserTokenMissingError } from "@/lib/m
 //   "to": "5219991234567",
 //   "template_name": "nombre_plantilla",
 //   "template_params": ["p1","p2","p3"],
-//   "template_language": "es_MX"  // opcional, default es_MX
+//   "template_language": "es_MX", // opcional, default es_MX
+//   "header_media": { "type": "document", "url": "https://.../archivo.pdf", "filename": "archivo.pdf" }
 // }
 export const Route = createFileRoute("/api/public/whatsapp/send-message")({
   server: {
@@ -41,6 +50,10 @@ export const Route = createFileRoute("/api/public/whatsapp/send-message")({
             template_name?: string;
             template_params?: string[];
             template_language?: string;
+            media_url?: string;
+            filename?: string;
+            caption?: string;
+            header_media?: OutboundMediaInput;
             inbound_message_id?: string;
           } | null;
           try {
@@ -78,14 +91,40 @@ export const Route = createFileRoute("/api/public/whatsapp/send-message")({
               { status: 400 },
             );
           }
-          if (!isTemplate && !isTypingIndicator && !body.message) {
+          const isMediaMessage = type === "document" || type === "image";
+          if (!isTemplate && !isTypingIndicator && !isMediaMessage && !body.message) {
             return Response.json(
               { ok: false, error: "missing_params", detail: "message es requerido para type=text" },
               { status: 400 },
             );
           }
-          if (type !== "text" && type !== "template" && type !== "typing_indicator") {
+          if (
+            type !== "text" &&
+            type !== "template" &&
+            type !== "typing_indicator" &&
+            type !== "document" &&
+            type !== "image"
+          ) {
             return Response.json({ ok: false, error: "unsupported_type" }, { status: 400 });
+          }
+          const headerMedia = body.header_media;
+          if (
+            headerMedia &&
+            (!isTemplate ||
+              (headerMedia.type !== "document" && headerMedia.type !== "image") ||
+              !headerMedia.url)
+          ) {
+            return Response.json({ ok: false, error: "invalid_header_media" }, { status: 400 });
+          }
+          if (isMediaMessage && !body.media_url) {
+            return Response.json(
+              {
+                ok: false,
+                error: "missing_params",
+                detail: "media_url es requerido para type=document o type=image",
+              },
+              { status: 400 },
+            );
           }
 
           const { databaseAdmin } = await import("@/integrations/database/client.server");
@@ -129,7 +168,10 @@ export const Route = createFileRoute("/api/public/whatsapp/send-message")({
             systemUserToken = getMetaSystemUserToken();
           } catch (error) {
             if (error instanceof MetaSystemUserTokenMissingError) {
-              return Response.json({ ok: false, error: "meta_system_user_token_not_configured" }, { status: 503 });
+              return Response.json(
+                { ok: false, error: "meta_system_user_token_not_configured" },
+                { status: 503 },
+              );
             }
             throw error;
           }
@@ -225,6 +267,36 @@ export const Route = createFileRoute("/api/public/whatsapp/send-message")({
           let metaBody: Record<string, any>;
           let messagePreview: string;
           let messageType: string;
+          let uploadedMedia: { id: string; filename: string } | null = null;
+
+          const mediaInput: OutboundMediaInput | null = headerMedia
+            ? headerMedia
+            : isMediaMessage
+              ? {
+                  type: type as "document" | "image",
+                  url: body.media_url!,
+                  filename: body.filename,
+                  caption: body.caption,
+                }
+              : null;
+          if (mediaInput) {
+            try {
+              uploadedMedia = await uploadOutboundMedia({
+                phoneNumberId: acct.phone_number_id,
+                systemUserToken,
+                graphVersion: version,
+                media: mediaInput,
+              });
+            } catch (error) {
+              if (error instanceof OutboundMediaError) {
+                return Response.json(
+                  { ok: false, error: error.code, detail: error.message },
+                  { status: 400 },
+                );
+              }
+              throw error;
+            }
+          }
 
           if (isTypingIndicator) {
             // Meta: marca leído + typing indicator ligado a un wamid puntual.
@@ -240,7 +312,7 @@ export const Route = createFileRoute("/api/public/whatsapp/send-message")({
           } else if (isTemplate) {
             const params = Array.isArray(body.template_params) ? body.template_params : [];
             const language = body.template_language || "es_MX";
-            const components =
+            const components: Record<string, unknown>[] =
               params.length > 0
                 ? [
                     {
@@ -249,6 +321,19 @@ export const Route = createFileRoute("/api/public/whatsapp/send-message")({
                     },
                   ]
                 : [];
+            if (headerMedia && uploadedMedia) {
+              components.unshift({
+                type: "header",
+                parameters: [
+                  headerMedia.type === "document"
+                    ? {
+                        type: "document",
+                        document: { id: uploadedMedia.id, filename: uploadedMedia.filename },
+                      }
+                    : { type: "image", image: { id: uploadedMedia.id } },
+                ],
+              });
+            }
             metaBody = {
               messaging_product: "whatsapp",
               to: body.to,
@@ -261,6 +346,26 @@ export const Route = createFileRoute("/api/public/whatsapp/send-message")({
             };
             messagePreview = `[template:${body.template_name}] ${params.join(" | ")}`.slice(0, 200);
             messageType = "template";
+          } else if (isMediaMessage && uploadedMedia && mediaInput) {
+            metaBody = {
+              messaging_product: "whatsapp",
+              to: body.to,
+              type,
+              [type]:
+                type === "document"
+                  ? {
+                      id: uploadedMedia.id,
+                      filename: uploadedMedia.filename,
+                      ...(mediaInput.caption ? { caption: mediaInput.caption } : {}),
+                    }
+                  : {
+                      id: uploadedMedia.id,
+                      ...(mediaInput.caption ? { caption: mediaInput.caption } : {}),
+                    },
+            };
+            messagePreview =
+              `[${type}:${uploadedMedia.filename}] ${mediaInput.caption ?? ""}`.slice(0, 200);
+            messageType = type;
           } else {
             metaBody = {
               messaging_product: "whatsapp",
