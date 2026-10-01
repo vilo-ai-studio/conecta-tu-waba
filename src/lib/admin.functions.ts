@@ -219,6 +219,20 @@ export const updateClientN8n = createServerFn({ method: "POST" })
       console.error("[updateClientN8n] error", error);
       throw new Error(error.message);
     }
+    if (!data.n8n_enabled) {
+      const { getPool } = await import("@/integrations/database/client.server");
+      await getPool().query(
+        `WITH resolved AS (
+          UPDATE webhook_jobs SET status = 'completed', completed_at = now(),
+            failed_at = NULL, last_error = NULL, updated_at = now()
+          WHERE client_id = $1 AND status = 'failed' AND last_error = 'n8n_disabled_for_client'
+          RETURNING id
+        )
+        UPDATE meta_webhook_events SET processed = true, processing_error = NULL
+        WHERE webhook_job_id IN (SELECT id FROM resolved)`,
+        [data.id],
+      );
+    }
     return {
       id: updated.id,
       n8n_enabled: updated.n8n_enabled,

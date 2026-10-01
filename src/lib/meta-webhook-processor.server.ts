@@ -248,7 +248,14 @@ async function processSingleMetaChangeJob(job: MetaChangeJobV1, itemKey: string)
   if (!message || eventKind !== "message" || !messageId || !fromWaId) {
     throw new PermanentJobError(`unsupported_or_incomplete_event:${eventKind}`);
   }
-  if (!account.n8n_enabled) throw new PermanentJobError("n8n_disabled_for_client");
+  if (!account.n8n_enabled) {
+    const result = await getPool().query(
+      "UPDATE meta_webhook_events SET processed = true, processing_error = NULL WHERE id = $1",
+      [inserted.data.id],
+    );
+    if (!result.rowCount) throw new RetryableJobError("event_skip_update_failed");
+    return;
+  }
   if (!account.n8n_webhook_url) throw new PermanentJobError("n8n_webhook_url_missing");
   if (!account.n8n_webhook_secret) throw new PermanentJobError("n8n_webhook_secret_missing");
 

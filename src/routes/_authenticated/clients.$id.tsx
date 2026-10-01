@@ -851,9 +851,10 @@ function ClientDetail() {
             <CardContent className="space-y-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <Label htmlFor="n8n-enabled">Reenvío a n8n habilitado</Label>
+                  <Label htmlFor="n8n-enabled">Reenviar mensajes entrantes a n8n</Label>
                   <p className="text-xs text-muted-foreground">
-                    Solo se reenvían eventos si está activado y hay URL configurada.
+                    Desactivado: recepción manual, sin errores ni reintentos de reenvío.
+                    n8n puede seguir enviando mensajes y plantillas mediante el router.
                   </p>
                 </div>
                 <Switch id="n8n-enabled" checked={n8nEnabled} onCheckedChange={setN8nEnabled} />
