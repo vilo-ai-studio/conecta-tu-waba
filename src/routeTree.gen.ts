@@ -29,6 +29,7 @@ import { Route as ApiPublicChatwootWebhookRouteImport } from './routes/api/publi
 import { Route as ApiPublicOnboardingCompleteRouteImport } from './routes/api/public/onboarding/complete'
 import { Route as ApiPublicOnboardingSelfStartRouteImport } from './routes/api/public/onboarding/self-start'
 import { Route as ApiPublicOnboardingValidateRouteImport } from './routes/api/public/onboarding/validate'
+import { Route as ApiPublicWhatsappDownloadImageRouteImport } from './routes/api/public/whatsapp/download-image'
 import { Route as ApiPublicWhatsappSendMessageRouteImport } from './routes/api/public/whatsapp/send-message'
 import { Route as ApiPublicWhatsappWebhookRouteImport } from './routes/api/public/whatsapp/webhook'
 
@@ -135,6 +136,12 @@ const ApiPublicOnboardingValidateRoute =
     path: '/api/public/onboarding/validate',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiPublicWhatsappDownloadImageRoute =
+  ApiPublicWhatsappDownloadImageRouteImport.update({
+    id: '/api/public/whatsapp/download-image',
+    path: '/api/public/whatsapp/download-image',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiPublicWhatsappSendMessageRoute =
   ApiPublicWhatsappSendMessageRouteImport.update({
     id: '/api/public/whatsapp/send-message',
@@ -168,6 +175,7 @@ export interface FileRoutesByFullPath {
   '/api/public/onboarding/complete': typeof ApiPublicOnboardingCompleteRoute
   '/api/public/onboarding/self-start': typeof ApiPublicOnboardingSelfStartRoute
   '/api/public/onboarding/validate': typeof ApiPublicOnboardingValidateRoute
+  '/api/public/whatsapp/download-image': typeof ApiPublicWhatsappDownloadImageRoute
   '/api/public/whatsapp/send-message': typeof ApiPublicWhatsappSendMessageRoute
   '/api/public/whatsapp/webhook': typeof ApiPublicWhatsappWebhookRoute
 }
@@ -191,6 +199,7 @@ export interface FileRoutesByTo {
   '/api/public/onboarding/complete': typeof ApiPublicOnboardingCompleteRoute
   '/api/public/onboarding/self-start': typeof ApiPublicOnboardingSelfStartRoute
   '/api/public/onboarding/validate': typeof ApiPublicOnboardingValidateRoute
+  '/api/public/whatsapp/download-image': typeof ApiPublicWhatsappDownloadImageRoute
   '/api/public/whatsapp/send-message': typeof ApiPublicWhatsappSendMessageRoute
   '/api/public/whatsapp/webhook': typeof ApiPublicWhatsappWebhookRoute
 }
@@ -216,6 +225,7 @@ export interface FileRoutesById {
   '/api/public/onboarding/complete': typeof ApiPublicOnboardingCompleteRoute
   '/api/public/onboarding/self-start': typeof ApiPublicOnboardingSelfStartRoute
   '/api/public/onboarding/validate': typeof ApiPublicOnboardingValidateRoute
+  '/api/public/whatsapp/download-image': typeof ApiPublicWhatsappDownloadImageRoute
   '/api/public/whatsapp/send-message': typeof ApiPublicWhatsappSendMessageRoute
   '/api/public/whatsapp/webhook': typeof ApiPublicWhatsappWebhookRoute
 }
@@ -241,6 +251,7 @@ export interface FileRouteTypes {
     | '/api/public/onboarding/complete'
     | '/api/public/onboarding/self-start'
     | '/api/public/onboarding/validate'
+    | '/api/public/whatsapp/download-image'
     | '/api/public/whatsapp/send-message'
     | '/api/public/whatsapp/webhook'
   fileRoutesByTo: FileRoutesByTo
@@ -264,6 +275,7 @@ export interface FileRouteTypes {
     | '/api/public/onboarding/complete'
     | '/api/public/onboarding/self-start'
     | '/api/public/onboarding/validate'
+    | '/api/public/whatsapp/download-image'
     | '/api/public/whatsapp/send-message'
     | '/api/public/whatsapp/webhook'
   id:
@@ -288,6 +300,7 @@ export interface FileRouteTypes {
     | '/api/public/onboarding/complete'
     | '/api/public/onboarding/self-start'
     | '/api/public/onboarding/validate'
+    | '/api/public/whatsapp/download-image'
     | '/api/public/whatsapp/send-message'
     | '/api/public/whatsapp/webhook'
   fileRoutesById: FileRoutesById
@@ -307,6 +320,7 @@ export interface RootRouteChildren {
   ApiPublicOnboardingCompleteRoute: typeof ApiPublicOnboardingCompleteRoute
   ApiPublicOnboardingSelfStartRoute: typeof ApiPublicOnboardingSelfStartRoute
   ApiPublicOnboardingValidateRoute: typeof ApiPublicOnboardingValidateRoute
+  ApiPublicWhatsappDownloadImageRoute: typeof ApiPublicWhatsappDownloadImageRoute
   ApiPublicWhatsappSendMessageRoute: typeof ApiPublicWhatsappSendMessageRoute
   ApiPublicWhatsappWebhookRoute: typeof ApiPublicWhatsappWebhookRoute
 }
@@ -453,6 +467,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicOnboardingValidateRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/whatsapp/download-image': {
+      id: '/api/public/whatsapp/download-image'
+      path: '/api/public/whatsapp/download-image'
+      fullPath: '/api/public/whatsapp/download-image'
+      preLoaderRoute: typeof ApiPublicWhatsappDownloadImageRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/whatsapp/send-message': {
       id: '/api/public/whatsapp/send-message'
       path: '/api/public/whatsapp/send-message'
@@ -516,6 +537,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPublicOnboardingCompleteRoute: ApiPublicOnboardingCompleteRoute,
   ApiPublicOnboardingSelfStartRoute: ApiPublicOnboardingSelfStartRoute,
   ApiPublicOnboardingValidateRoute: ApiPublicOnboardingValidateRoute,
+  ApiPublicWhatsappDownloadImageRoute: ApiPublicWhatsappDownloadImageRoute,
   ApiPublicWhatsappSendMessageRoute: ApiPublicWhatsappSendMessageRoute,
   ApiPublicWhatsappWebhookRoute: ApiPublicWhatsappWebhookRoute,
 }

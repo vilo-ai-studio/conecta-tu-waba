@@ -102,7 +102,7 @@ export async function validateOutboundMediaUrl(value: string): Promise<URL> {
 async function fetchPublicMedia(
   value: string,
   maxBytes: number,
-): Promise<{ bytes: Uint8Array; contentType: string; sourceUrl: URL }> {
+): Promise<{ bytes: Uint8Array<ArrayBuffer>; contentType: string; sourceUrl: URL }> {
   let url = await validateOutboundMediaUrl(value);
   for (let redirect = 0; redirect <= MAX_REDIRECTS; redirect += 1) {
     let response: Response;
@@ -160,7 +160,7 @@ async function fetchPublicMedia(
   throw new OutboundMediaError("No se pudo descargar media_url", "media_download_failed");
 }
 
-function detectMediaMime(type: OutboundMediaType, bytes: Uint8Array, declaredType: string): string {
+export function detectMediaMime(type: OutboundMediaType, bytes: Uint8Array, declaredType: string): string {
   const starts = (...values: number[]) => values.every((value, index) => bytes[index] === value);
   if (type === "document") {
     if (starts(0x25, 0x50, 0x44, 0x46, 0x2d)) return "application/pdf";
