@@ -1,6 +1,7 @@
 # C24 — sincronización de WhatsApp Business App
 
-Rama `codex/c24-whatsapp-app-sync`, base `05f75b2`. Lista para revisión local; no publicada.
+Rama `codex/c24-whatsapp-app-sync`, base `05f75b2`. **Publicado el 13 de octubre de 2026**:
+runtime `589d96c`, app y worker actualizados, cliente C24 exclusivamente habilitado.
 
 El worker acepta `smb_message_echoes/value.message_echoes`, separa cada mensaje y valida `from`
 contra el número registrado de la cuenta. Cada eco conserva `raw`, cliente y cuenta; el destino
@@ -17,9 +18,8 @@ En la revisión del 13 de octubre se comprobó el Compose con un UUID ficticio y
 las 16 pruebas de integración, todas aprobadas. La revisión independiente no encontró otros
 bloqueos de código para este alcance.
 
-Consulta de Meta del 13 de octubre: la cuenta C24 está suscrita a la aplicación del router;
-el callback de la aplicación es el de Connect y sus campos activos contienen únicamente
-`messages`. Falta habilitar `smb_message_echoes` después de actualizar ambos servicios.
+Meta verificado tras publicar primero C24 y después Connect: callback conservado;
+`messages` y `smb_message_echoes` activos desde las 13:34:51 de Mérida.
 
 La cola distingue ecos por cuenta e ids. El bloqueo usa el destinatario del eco. No se trata al
 emisor de la empresa como cliente ni se ejecuta la sincronización de entrada de Chatwoot para un
@@ -41,11 +41,22 @@ La integración requiere `APP_SYNC_TEST_DATABASE_URL` en loopback y base
 completos están en el handoff de C24 `docs/tasks/whatsapp-app-sync-handoff.md`. Sin esas variables,
 el test integrado se omite y los tests unitarios siguen disponibles.
 
-## Publicación pendiente
+## Publicación y prueba real
 
-Revisar ambos repositorios. Verificar suscripción efectiva de Meta a `smb_message_echoes` y que
-la cuenta use coexistencia. Tras autorización y respaldo, publicar tanto app como worker de
-Connect después de C24; habilitar la suscripción Meta al final para evitar que un receptor
-anterior acepte el HTTP sin conservar el mensaje. Un worker con código anterior seguirá rechazando ecos. Probar un envío
-real desde el celular y verificar el mismo id en la bandeja. No se garantiza historial anterior.
-Solo se sincronizan texto/caption y tipo; no se recuperan binarios ni se aplican ediciones/revokes.
+C24 runtime `d17fe7e` se publicó primero. Connect app y worker usan
+`conecta-waba:app-sync-589d96c`; ambos saludables, sin reinicios y con heartbeat posterior al
+arranque. Configuración verificada: solo el UUID C24 recibe ecos. Respaldos restaurados en una
+base aislada, cifrados y copiados al destino privado previamente autorizado; se comprobó el
+descifrado sin archivo en claro. Rollback reproduce las imágenes anteriores por servicio.
+
+A las 13:38:24 llegó un eco real, hash `b235e6572be11d9b`, destinatario terminado en 0360.
+Evento `smb_message_echoes`, cuenta coincidente, `is_meta_test=false`, job completed y reenvío
+200 con un mensaje aceptado. C24 conserva una sola fila `outbound/human`, fecha 13:38:23 y
+texto de 192 caracteres; el navegador de Gerencia muestra **Respuesta humana** con la misma
+fecha/longitud. No se exporta el contenido ni el teléfono. El eco fue de operación, no una
+prueba sintética ni un envío del agente de desarrollo.
+
+La sincronización no se limita al número de canary; ese límite corresponde a respuestas
+automáticas/pruebas activas de C24. No se garantiza historial anterior. Solo se sincronizan
+texto/caption y tipo; no se recuperan binarios ni se aplican ediciones/revokes. Evidencia completa
+(y la consulta específica del hilo indicado por Eliam) en el handoff C24.
