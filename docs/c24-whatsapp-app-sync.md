@@ -11,6 +11,16 @@ El reenvío de ecos exige habilitación explícita en `WHATSAPP_APP_ECHO_CLIENT_
 exactos, sin comodín); vacío no reenvía ecos. Activar solo el cliente C24, en app y worker.
 Los demás clientes conservan sus automatizaciones entrantes.
 
+`compose.yaml` transmite esta variable tanto a `app` como a `worker`; modificar solamente
+el archivo privado sin esa declaración dejaría la lista vacía dentro de los contenedores.
+En la revisión del 13 de octubre se comprobó el Compose con un UUID ficticio y se repitieron
+las 16 pruebas de integración, todas aprobadas. La revisión independiente no encontró otros
+bloqueos de código para este alcance.
+
+Consulta de Meta del 13 de octubre: la cuenta C24 está suscrita a la aplicación del router;
+el callback de la aplicación es el de Connect y sus campos activos contienen únicamente
+`messages`. Falta habilitar `smb_message_echoes` después de actualizar ambos servicios.
+
 La cola distingue ecos por cuenta e ids. El bloqueo usa el destinatario del eco. No se trata al
 emisor de la empresa como cliente ni se ejecuta la sincronización de entrada de Chatwoot para un
 eco saliente. Estados de entrega y entradas habituales conservan su ruta. Se reutilizan secreto,
