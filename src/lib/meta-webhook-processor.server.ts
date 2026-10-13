@@ -23,6 +23,7 @@ export class RetryableJobError extends Error {
 
 type AccountRoute = {
   account_id: string;
+  display_phone_number: string | null;
   client_id: string;
   n8n_enabled: boolean;
   n8n_webhook_url: string | null;
@@ -32,6 +33,7 @@ type AccountRoute = {
 type MetaMessage = {
   id?: string;
   from?: string;
+  to?: string;
   type?: string;
   text?: { body?: string };
   timestamp?: string;
@@ -59,6 +61,7 @@ type MetaChange = {
   value?: {
     metadata?: { phone_number_id?: string; display_phone_number?: string };
     messages?: MetaMessage[];
+    message_echoes?: MetaMessage[];
     statuses?: MetaStatus[];
     contacts?: MetaContact[];
   };
@@ -73,12 +76,13 @@ async function loadAccount(phoneNumberId: string | null): Promise<AccountRoute> 
   if (!phoneNumberId) throw new PermanentJobError("missing_phone_number_id");
   const result = await getPool().query<{
     account_id: string;
+    display_phone_number: string | null;
     client_id: string;
     n8n_enabled: boolean;
     n8n_webhook_url: string | null;
     n8n_webhook_secret_encrypted: string | null;
   }>(
-    `SELECT wa.id AS account_id, wa.client_id, c.n8n_enabled, c.n8n_webhook_url,
+    `SELECT wa.id AS account_id, wa.display_phone_number, wa.client_id, c.n8n_enabled, c.n8n_webhook_url,
             c.n8n_webhook_secret_encrypted
        FROM whatsapp_accounts wa
        JOIN clients c ON c.id = wa.client_id
@@ -90,6 +94,7 @@ async function loadAccount(phoneNumberId: string | null): Promise<AccountRoute> 
   if (!row) throw new PermanentJobError(`account_not_found:${phoneNumberId}`);
   return {
     account_id: row.account_id,
+    display_phone_number: row.display_phone_number,
     client_id: row.client_id,
     n8n_enabled: row.n8n_enabled,
     n8n_webhook_url: row.n8n_webhook_url,
@@ -119,7 +124,18 @@ export async function processMetaChangeJob(job: MetaChangeJobV1): Promise<void> 
   const original = job.change as MetaChange;
   const value = original.value ?? {};
   const items: Array<{ key: string; change: MetaChange }> = [];
-  if (Array.isArray(value.messages)) {
+  if (original.field === "smb_message_echoes" && Array.isArray(value.message_echoes)) {
+    value.message_echoes.forEach((message, index) => {
+      items.push({
+        key: `app-echo:${message?.id ?? index}`,
+        change: {
+          ...original,
+          value: { ...value, message_echoes: [message], messages: undefined, statuses: undefined },
+        },
+      });
+    });
+  }
+  if (original.field !== "smb_message_echoes" && Array.isArray(value.messages)) {
     value.messages.forEach((message, index) => {
       items.push({
         key: `message:${message?.id ?? index}`,
@@ -127,7 +143,7 @@ export async function processMetaChangeJob(job: MetaChangeJobV1): Promise<void> 
       });
     });
   }
-  if (Array.isArray(value.statuses)) {
+  if (original.field !== "smb_message_echoes" && Array.isArray(value.statuses)) {
     value.statuses.forEach((status, index) => {
       items.push({
         key: `status:${status?.id ?? index}:${status?.status ?? "unknown"}`,
@@ -147,13 +163,20 @@ async function processSingleMetaChangeJob(job: MetaChangeJobV1, itemKey: string)
   const field: string | null = change.field ?? null;
   const phoneNumberId = value?.metadata?.phone_number_id ?? job.phoneNumberId;
   const displayPhoneNumber: string | null = value?.metadata?.display_phone_number ?? null;
-  const message = first<MetaMessage>(value.messages);
+  const isAppEcho = field === "smb_message_echoes";
+  const message = first<MetaMessage>(isAppEcho ? value.message_echoes : value.messages);
   const messageStatus = first<MetaStatus>(value.statuses);
   const contact = first<MetaContact>(value.contacts);
   if (!phoneNumberId) throw new PermanentJobError("missing_phone_number_id");
   const account = await loadAccount(phoneNumberId);
 
-  const eventKind = message ? "message" : messageStatus ? "status" : field || "unknown";
+  const eventKind = message
+    ? isAppEcho
+      ? "message_echo"
+      : "message"
+    : messageStatus
+      ? "status"
+      : field || "unknown";
   const messageId: string | null = message?.id ?? messageStatus?.id ?? null;
   const fromWaId: string | null = message
     ? normalizeWaId(message.from ?? null) || message.from || null
@@ -188,7 +211,7 @@ async function processSingleMetaChangeJob(job: MetaChangeJobV1, itemKey: string)
           event_kind: eventKind,
           wa_message_id: messageId,
           from_wa_id: fromWaId,
-          to_phone_number: displayPhoneNumber,
+          to_phone_number: isAppEcho ? normalizeWaId(message?.to ?? null) : displayPhoneNumber,
           message_type: message?.type ?? null,
           text_body: message?.text?.body ?? null,
           status,
@@ -245,8 +268,42 @@ async function processSingleMetaChangeJob(job: MetaChangeJobV1, itemKey: string)
     return;
   }
 
-  if (!message || eventKind !== "message" || !messageId || !fromWaId) {
+  // The shared router must not feed app replies into another client's inbound automation.
+  if (
+    isAppEcho &&
+    !(process.env.WHATSAPP_APP_ECHO_CLIENT_IDS ?? "")
+      .split(",")
+      .map((id) => id.trim())
+      .includes(account.client_id)
+  ) {
+    await databaseAdmin.from("n8n_forward_logs").insert({
+      client_id: account.client_id,
+      whatsapp_account_id: account.account_id,
+      meta_webhook_event_id: inserted.data.id,
+      phone_number_id: phoneNumberId,
+      n8n_webhook_url: account.n8n_webhook_url,
+      forward_attempted: false,
+      n8n_enabled_value: account.n8n_enabled,
+      success: true,
+      error_message: "app_echo_not_enabled_for_client",
+    });
+    await databaseAdmin
+      .from("meta_webhook_events")
+      .update({ processed: true })
+      .eq("id", inserted.data.id);
+    await markRawEventIfFinished(job.rawEventId);
+    return;
+  }
+  if (!message || !["message", "message_echo"].includes(eventKind) || !messageId || !fromWaId) {
     throw new PermanentJobError(`unsupported_or_incomplete_event:${eventKind}`);
+  }
+  if (
+    isAppEcho &&
+    (!normalizeWaId(message.to ?? null) ||
+      !account.display_phone_number ||
+      normalizeWaId(account.display_phone_number) !== fromWaId)
+  ) {
+    throw new PermanentJobError("invalid_app_echo_participants");
   }
   if (!account.n8n_enabled) {
     const result = await getPool().query(
@@ -262,24 +319,26 @@ async function processSingleMetaChangeJob(job: MetaChangeJobV1, itemKey: string)
   let chatwootPaused = false;
   let chatwootNote = "chatwoot_not_run";
   try {
-    const { syncInboundToChatwoot } = await import("@/lib/chatwoot-sync.server");
-    const result = await syncInboundToChatwoot({
-      client_id: account.client_id,
-      wa_id: fromWaId,
-      profile_name: contact?.profile?.name ?? null,
-      wa_message_id: messageId,
-      message_type: message.type ?? null,
-      text: message?.text?.body ?? null,
-    });
-    chatwootPaused = result.synced ? result.bot_paused : false;
-    chatwootNote = result.synced
-      ? `chatwoot_synced:paused=${result.bot_paused}`
-      : `chatwoot_${result.reason}`;
-    if (!result.synced && result.reason !== "chatwoot_disabled_or_unconfigured") {
-      if (result.retryable) {
-        throw new RetryableJobError(chatwootNote, result.retryAfterMs);
+    if (!isAppEcho) {
+      const { syncInboundToChatwoot } = await import("@/lib/chatwoot-sync.server");
+      const result = await syncInboundToChatwoot({
+        client_id: account.client_id,
+        wa_id: fromWaId,
+        profile_name: contact?.profile?.name ?? null,
+        wa_message_id: messageId,
+        message_type: message.type ?? null,
+        text: message?.text?.body ?? null,
+      });
+      chatwootPaused = result.synced ? result.bot_paused : false;
+      chatwootNote = result.synced
+        ? `chatwoot_synced:paused=${result.bot_paused}`
+        : `chatwoot_${result.reason}`;
+      if (!result.synced && result.reason !== "chatwoot_disabled_or_unconfigured") {
+        if (result.retryable) {
+          throw new RetryableJobError(chatwootNote, result.retryAfterMs);
+        }
+        throw new PermanentJobError(chatwootNote);
       }
-      throw new PermanentJobError(chatwootNote);
     }
   } catch (error) {
     if (error instanceof RetryableJobError || error instanceof PermanentJobError) throw error;
@@ -313,7 +372,8 @@ async function processSingleMetaChangeJob(job: MetaChangeJobV1, itemKey: string)
     whatsapp_account_id: account.account_id,
     phone_number_id: phoneNumberId,
     display_phone_number: displayPhoneNumber,
-    event_kind: "message",
+    event_kind: eventKind,
+    ...(isAppEcho ? { direction: "outbound", to: normalizeWaId(message.to ?? null) } : {}),
     from: fromWaId,
     contact_name: contact?.profile?.name ?? null,
     message_id: messageId,

@@ -25,13 +25,15 @@ async function conversationKey(data: MetaChangeJobV1): Promise<string> {
   const change = data.change as {
     value?: {
       messages?: Array<{ from?: string }>;
+      message_echoes?: Array<{ to?: string }>;
       statuses?: Array<{ recipient_id?: string }>;
     };
   };
   const value = change?.value ?? {};
   const message = Array.isArray(value.messages) ? value.messages[0] : null;
   const status = Array.isArray(value.statuses) ? value.statuses[0] : null;
-  const participant = message?.from ?? status?.recipient_id ?? "account";
+  const echo = Array.isArray(value.message_echoes) ? value.message_echoes[0] : null;
+  const participant = echo?.to ?? message?.from ?? status?.recipient_id ?? "account";
   const account = data.phoneNumberId
     ? await getPool().query<{ client_id: string }>(
         "SELECT client_id FROM whatsapp_accounts WHERE phone_number_id = $1 LIMIT 1",

@@ -24,6 +24,7 @@ type MetaWebhookChange = {
   value?: {
     metadata?: { phone_number_id?: string };
     messages?: Array<{ id?: string; from?: string; timestamp?: string }>;
+    message_echoes?: Array<{ id?: string; to?: string; timestamp?: string }>;
     statuses?: Array<{
       id?: string;
       status?: string;
@@ -94,8 +95,19 @@ export function verifyMetaSignature(rawBody: string, signature: string | null): 
   return expected.length === provided.length && timingSafeEqual(expected, provided);
 }
 
-function jobDeduplicationKey(entryId: string | null, change: MetaWebhookChange): string {
+export function jobDeduplicationKey(entryId: string | null, change: MetaWebhookChange): string {
   const value = change?.value ?? {};
+  if (change.field === "smb_message_echoes") {
+    const ids = Array.isArray(value.message_echoes)
+      ? value.message_echoes
+          .map((message) => message?.id)
+          .filter(Boolean)
+          .sort()
+      : [];
+    if (ids.length) {
+      return `app-echo:${value.metadata?.phone_number_id ?? entryId}:${createHash("sha256").update(JSON.stringify(ids)).digest("hex")}`;
+    }
+  }
   const messageIds = Array.isArray(value.messages)
     ? value.messages.map((message) => message?.id).filter(Boolean)
     : [];
